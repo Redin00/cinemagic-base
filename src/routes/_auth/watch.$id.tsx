@@ -117,6 +117,7 @@ function WatchPage() {
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playLoggedRef = useRef(false);
   const latestSecondsRef = useRef<number | null>(null);
+  const embedFrameRef = useRef<HTMLIFrameElement>(null);
 
   const slug = title?.slug ?? "";
   const season = activeSeason?.number ?? 0;
@@ -262,10 +263,11 @@ function WatchPage() {
   useEffect(() => {
     if (!resumeEmbedUrl || !markerLoaded) return;
 
-    const embedOrigin = new URL(resumeEmbedUrl).origin;
     const handlePlayerMessage = (event: MessageEvent) => {
-      if (event.origin !== embedOrigin) return;
-      const payload = event.data as {
+      const frameWindow = embedFrameRef.current?.contentWindow;
+      if (!frameWindow || event.source !== frameWindow) return;
+
+      let payload = event.data as {
         type?: unknown;
         event?: unknown;
         currentTime?: unknown;
@@ -277,6 +279,13 @@ function WatchPage() {
           duration?: unknown;
         };
       };
+      if (typeof event.data === "string") {
+        try {
+          payload = JSON.parse(event.data) as typeof payload;
+        } catch {
+          return;
+        }
+      }
       const playerEvent = payload?.data?.event ?? payload?.event;
       if (
         payload?.type !== "PLAYER_EVENT" ||
@@ -358,6 +367,7 @@ function WatchPage() {
           {adBlockPrompt.shouldShow ? <AdBlockPrompt browser={adBlockPrompt.info.browser} /> : null}
           <div className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-black">
             <iframe
+              ref={embedFrameRef}
               src={resumeEmbedUrl ?? embedUrl}
               title={`${title.name} player`}
               className="size-full"
