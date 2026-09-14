@@ -46,7 +46,9 @@ export async function serviceFetch<T>(path: string, init?: RequestInit): Promise
 
   const headers = new Headers(init?.headers);
   headers.set("accept", "application/json");
-  if (init?.body) headers.set("content-type", "application/json");
+  if (init?.body && !(init.body instanceof FormData)) {
+    headers.set("content-type", "application/json");
+  }
   const token = getCookie(SESSION_COOKIE);
   if (token) headers.set("authorization", `Bearer ${token}`);
 

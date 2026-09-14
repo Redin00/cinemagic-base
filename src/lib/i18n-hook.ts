@@ -14,9 +14,15 @@ export function useTranslation() {
   );
 
   const t = useCallback(
-    (key: keyof Translations) => {
+    (key: keyof Translations, params?: Record<string, string | number>) => {
       const dict = locale === "it" ? IT : EN;
-      return dict[key] ?? key;
+      let value: string = dict[key] ?? key;
+      if (params) {
+        for (const [k, v] of Object.entries(params)) {
+          value = value.replace(new RegExp(`{${k}}`, "g"), String(v));
+        }
+      }
+      return value;
     },
     [locale],
   );

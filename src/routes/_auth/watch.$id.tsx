@@ -8,7 +8,12 @@ import { HlsPlayer } from "@/components/HlsPlayer";
 import { AdBlockPrompt, useAdBlockPrompt } from "@/components/AdBlockPrompt";
 import { useBrowserInfo } from "@/hooks/use-browser-info";
 import { historyQuery } from "@/lib/auth/queries";
-import { recordPlay } from "@/lib/library.functions";
+import {
+  getWatchMarker,
+  recordPlay,
+  updateWatchMarker,
+  formatWatchPosition,
+} from "@/lib/library.functions";
 import { getPlayerConfig, getStreamSource, getTitle } from "@/lib/streaming.functions";
 import { buildEmbedUrl } from "@/lib/streaming/player";
 import { useTranslation } from "@/lib/i18n-hook";
@@ -105,23 +110,199 @@ function WatchPage() {
       })
     : null;
 
-  const recorded = useRef<string | null>(null);
-  useEffect(() => {
-    if (!title || (!playlistUrl && !embedUrl)) return;
-    const key = `${title.slug}:${activeSeason?.number ?? 0}:${activeEpisode?.number ?? 0}`;
-    if (recorded.current === key) return;
-    recorded.current = key;
-    void recordPlay({
-      data: {
-        slug: title.slug,
-        title,
+  // --- resume position ---
+
+  const [marker, setMarker] = useState<number | null>(null);
+  const [markerLoaded, setMarkerLoaded] = useState(false);
+  const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playLoggedRef = useRef(false);
+  const latestSecondsRef = useRef<number | null>(null);
+
+  const slug = title?.slug ?? "";
+  const season = activeSeason?.number ?? 0;
+  const episode = activeEpisode?.number ?? 0;
+  const resumeEmbedUrl = embedUrl
+    ? buildEmbedUrl(player, {
+        tmdbId: title.tmdbId!,
+        type: title.type,
         season: activeSeason?.number,
         episode: activeEpisode?.number,
-      },
-    }).then((result) => {
-      if (result.ok) void queryClient.invalidateQueries({ queryKey: historyQuery.queryKey });
-    });
-  }, [title, playlistUrl, embedUrl, activeSeason?.number, activeEpisode?.number, queryClient]);
+        startAt: marker ?? undefined,
+      })
+    : null;
+
+  // Load the marker from the server first; fall back to a localStorage copy
+  // that was saved as a cross-session safety net when the service was down.
+  useEffect(() => {
+    if (!title) return;
+
+    let cancelled = false;
+    setMarker(null);
+    setMarkerLoaded(false);
+
+    (async () => {
+      const watched = await getWatchMarker({
+        data: { slug, season, episode },
+      });
+      if (cancelled) return;
+      let saved = watched?.marker;
+      if (saved === undefined || saved === null) {
+        try {
+          const local = localStorage.getItem(`watch-marker:${slug}:${season}:${episode}`);
+          if (local !== null) {
+            const parsed = parseInt(local, 10);
+            if (!Number.isNaN(parsed) && parsed > 0) saved = parsed;
+          }
+        } catch {
+          // localStorage unavailable — ignore.
+        }
+      }
+      setMarker(saved !== undefined && saved !== null ? saved : null);
+      setMarkerLoaded(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [title, slug, season, episode]);
+
+  // Record a play row the moment playback has a resolvable source, so the
+  // title shows up in "recently watched" and resume can find a marker row
+  // even if the user stops before the debounced marker write fires.
+  useEffect(() => {
+    if (!title || (!playlistUrl && !embedUrl)) return;
+
+    let cancelled = false;
+    playLoggedRef.current = false;
+
+    (async () => {
+      await recordPlay({
+        data: { slug, title, season, episode },
+      });
+      if (cancelled) return;
+      playLoggedRef.current = true;
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [title, playlistUrl, embedUrl, slug, season, episode]);
+
+  // Debounced persistence of the current playback position.
+  // Flush a pending write when leaving this title or episode so the marker is
+  // stored under the same context that produced it.
+  useEffect(() => {
+    return () => {
+      const seconds = latestSecondsRef.current;
+      if (seconds !== null) {
+        if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
+        saveDebounceRef.current = null;
+        const clamped = Math.max(0, Math.round(seconds));
+        void updateWatchMarker({
+          data: { slug, title, season, episode, marker: clamped },
+        });
+        try {
+          const key = `watch-marker:${slug}:${season}:${episode}`;
+          localStorage.setItem(key, String(clamped));
+        } catch {
+          // Ignore quota/storage errors — the server write is the source of truth.
+        }
+      }
+    };
+  }, [slug, title, season, episode]);
+
+  function persistMarker(seconds: number, immediate = false) {
+    if (!markerLoaded) return;
+    latestSecondsRef.current = seconds;
+    if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
+    const save = () => {
+      saveDebounceRef.current = null;
+      if (!title) return;
+      const clamped = Math.max(0, Math.round(seconds));
+      void updateWatchMarker({
+        data: { slug, title, season, episode, marker: clamped },
+      });
+      // Persist to localStorage as a cross-session fallback so the resume
+      // marker survives even when the streaming service is unreachable.
+      try {
+        const key = `watch-marker:${slug}:${season}:${episode}`;
+        localStorage.setItem(key, String(clamped));
+      } catch {
+        // Ignore quota/storage errors — the server write is the source of truth.
+      }
+    };
+    if (immediate) {
+      save();
+    } else {
+      saveDebounceRef.current = setTimeout(save, 2000);
+    }
+  }
+
+  useEffect(() => {
+    if (!resumeEmbedUrl || !markerLoaded) return;
+
+    const flushMarker = () => {
+      const seconds = latestSecondsRef.current;
+      if (seconds !== null) persistMarker(seconds, true);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flushMarker();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", flushMarker);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", flushMarker);
+    };
+  }, [resumeEmbedUrl, markerLoaded, slug, title, season, episode]);
+
+  useEffect(() => {
+    if (!resumeEmbedUrl || !markerLoaded) return;
+
+    const embedOrigin = new URL(resumeEmbedUrl).origin;
+    const handlePlayerMessage = (event: MessageEvent) => {
+      if (event.origin !== embedOrigin) return;
+      const payload = event.data as {
+        type?: unknown;
+        data?: {
+          event?: unknown;
+          currentTime?: unknown;
+          time?: unknown;
+          duration?: unknown;
+        };
+      };
+      const playerEvent = payload?.data?.event;
+      if (
+        payload?.type !== "PLAYER_EVENT" ||
+        !["timeupdate", "pause", "seeked", "ended"].includes(String(playerEvent))
+      ) {
+        return;
+      }
+      const rawSeconds = payload.data.currentTime ?? payload.data.time;
+      const seconds =
+        typeof rawSeconds === "number"
+          ? rawSeconds
+          : typeof rawSeconds === "string"
+            ? Number(rawSeconds)
+            : Number.NaN;
+      const rawDuration = payload.data.duration;
+      const duration =
+        typeof rawDuration === "number"
+          ? rawDuration
+          : typeof rawDuration === "string"
+            ? Number(rawDuration)
+            : Number.NaN;
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        persistMarker(seconds, playerEvent !== "timeupdate");
+      } else if (playerEvent === "ended" && Number.isFinite(duration) && duration > 0) {
+        persistMarker(duration, true);
+      }
+    };
+
+    window.addEventListener("message", handlePlayerMessage);
+    return () => window.removeEventListener("message", handlePlayerMessage);
+  }, [resumeEmbedUrl, markerLoaded, slug, title, season, episode]);
 
   if (!title) return null;
 
@@ -154,6 +335,8 @@ function WatchPage() {
             src={playlistUrl}
             title={`${title.name} player`}
             onFatal={() => setHlsFailed(true)}
+            onTimeUpdate={persistMarker}
+            initialSeconds={marker ?? undefined}
           />
         </div>
       ) : streamQuery.isLoading ? (
@@ -163,14 +346,12 @@ function WatchPage() {
       ) : embedUrl ? (
         <div className="space-y-2">
           {showFallbackNotice ? (
-            <p className="text-xs text-muted-foreground">
-              {t("watch_unavailable")}
-            </p>
+            <p className="text-xs text-muted-foreground">{t("watch_unavailable")}</p>
           ) : null}
           {adBlockPrompt.shouldShow ? <AdBlockPrompt browser={adBlockPrompt.info.browser} /> : null}
           <div className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-black">
             <iframe
-              src={embedUrl}
+              src={resumeEmbedUrl ?? embedUrl}
               title={`${title.name} player`}
               className="size-full"
               allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
@@ -182,9 +363,7 @@ function WatchPage() {
         <div className="rounded-xl border border-border bg-card p-10 text-center">
           <p className="text-sm font-medium text-card-foreground">{t("title_unavailable")}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {title.tmdbId
-              ? t("watch_noHostConfigured")
-              : t("watch_noExternalId")}
+            {title.tmdbId ? t("watch_noHostConfigured") : t("watch_noExternalId")}
           </p>
         </div>
       )}

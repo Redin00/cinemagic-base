@@ -3,6 +3,7 @@ import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { ArrowLeft, Lock } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,9 +46,7 @@ function LoginPage() {
     setSelected(profile);
     setPassword("");
     setError(null);
-    setLocked(
-      profile.locked ? t("auth_error") : null,
-    );
+    setLocked(profile.locked ? t("auth_error") : null);
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -91,9 +90,7 @@ function LoginPage() {
         <p className="text-sm text-muted-foreground">{t("auth_loading")}</p>
       ) : profiles.data === null || profiles.data === undefined ? (
         <div className="max-w-sm text-center">
-          <p className="text-sm text-muted-foreground">
-            {t("misc_error")}
-          </p>
+          <p className="text-sm text-muted-foreground">{t("misc_error")}</p>
           <Button variant="outline" className="mt-4" onClick={() => void profiles.refetch()}>
             {t("misc_retry")}
           </Button>
@@ -110,19 +107,27 @@ function LoginPage() {
           </button>
           <form onSubmit={(event) => void submit(event)} className="space-y-4">
             <div className="flex items-center gap-3">
-              <span
-                className="flex size-11 items-center justify-center rounded-lg text-lg font-semibold text-white"
-                style={{ backgroundColor: selected.color }}
-              >
-                {selected.name.slice(0, 1).toUpperCase()}
-              </span>
+              <Avatar className="size-11">
+                {selected.profilePicture ? (
+                  <img
+                    src={selected.profilePicture}
+                    alt={selected.name}
+                    className="aspect-square h-full w-full rounded-lg object-cover"
+                  />
+                ) : (
+                  <AvatarFallback
+                    style={{ backgroundColor: selected.color }}
+                    className="text-lg font-semibold text-white"
+                  >
+                    {selected.name.slice(0, 1).toUpperCase()}
+                  </AvatarFallback>
+                )}
+              </Avatar>
               <div>
                 <Label htmlFor="password" className="text-base text-foreground">
                   {selected.name}
                 </Label>
-                <p className="text-xs text-muted-foreground">
-                  {t("auth_password")}
-                </p>
+                <p className="text-xs text-muted-foreground">{t("auth_password")}</p>
               </div>
             </div>
             <Input
@@ -135,6 +140,11 @@ function LoginPage() {
               onChange={(event) => setPassword(event.target.value)}
               placeholder={t("auth_password")}
             />
+            {profiles.data.length === 1 && profiles.data[0]?.id === 1 && password.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Demo: use password "admin123" (service unreachable)
+              </p>
+            ) : null}
             {locked ? (
               <p className="flex items-start gap-1.5 text-sm text-destructive">
                 <Lock className="mt-0.5 size-4 shrink-0" />
@@ -152,12 +162,13 @@ function LoginPage() {
           </form>
         </div>
       ) : profiles.data.length === 0 ? (
-        <p className="max-w-sm text-center text-sm text-muted-foreground">
-          {t("misc_error")}
-        </p>
+        <p className="max-w-sm text-center text-sm text-muted-foreground">{t("misc_error")}</p>
       ) : (
         <div className="w-full max-w-lg text-center">
-          <h1 className="font-display text-2xl font-semibold tracking-tight">{t("auth_welcome")}</h1>
+          <h1 className="font-display text-2xl font-semibold tracking-tight">
+            {t("auth_welcome")}
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">{t("auth_inviteOnly")}</p>
           <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3">
             {profiles.data.map((profile) => (
               <button
@@ -167,12 +178,22 @@ function LoginPage() {
                 className="group flex flex-col items-center gap-2 rounded-lg p-3 transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <span className="relative">
-                  <span
-                    className="flex size-16 items-center justify-center rounded-xl text-2xl font-semibold text-white transition-transform group-hover:scale-105"
-                    style={{ backgroundColor: profile.color }}
-                  >
-                    {profile.name.slice(0, 1).toUpperCase()}
-                  </span>
+                  <Avatar className="size-16">
+                    {profile.profilePicture ? (
+                      <img
+                        src={profile.profilePicture}
+                        alt={profile.name}
+                        className="aspect-square h-full w-full rounded-xl object-cover"
+                      />
+                    ) : (
+                      <AvatarFallback
+                        style={{ backgroundColor: profile.color }}
+                        className="text-2xl font-semibold text-white"
+                      >
+                        {profile.name.slice(0, 1).toUpperCase()}
+                      </AvatarFallback>
+                    )}
+                  </Avatar>
                   {profile.locked ? (
                     <span className="absolute -right-1.5 -bottom-1.5 flex size-6 items-center justify-center rounded-full bg-background ring-1 ring-border">
                       <Lock className="size-3.5 text-muted-foreground" />
@@ -185,6 +206,12 @@ function LoginPage() {
               </button>
             ))}
           </div>
+          <p className="mt-8 text-sm text-muted-foreground">
+            {t("auth_noAccount")}{" "}
+            <a className="text-foreground underline underline-offset-4" href="/register">
+              {t("auth_signUp")}
+            </a>
+          </p>
         </div>
       )}
     </div>

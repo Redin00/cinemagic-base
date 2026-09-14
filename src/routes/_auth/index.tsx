@@ -30,7 +30,8 @@ export const Route = createFileRoute("/_auth/")({
       { title: "StreamApp - Rdn - Catalogue Overview" },
       {
         name: "description",
-        content: "Browse trending films and series, track catalogue stats and search the full library from one dashboard.",
+        content:
+          "Browse trending films and series, track catalogue stats and search the full library from one dashboard.",
       },
       { property: "og:title", content: "StreamApp - Rdn - Catalogue Overview" },
       {
@@ -50,7 +51,15 @@ export const Route = createFileRoute("/_auth/")({
   component: Dashboard,
 });
 
-function StatCard({ label, value, icon: Icon }: { label: string; value: string | number; icon: typeof Film }) {
+function StatCard({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: string | number;
+  icon: typeof Film;
+}) {
   return (
     <div className="rounded-xl border border-border bg-card p-5">
       <div className="flex items-center justify-between">
@@ -86,12 +95,18 @@ function Dashboard() {
           />
           <div className="absolute inset-0 bg-hero-fade" />
           <div className="absolute bottom-0 space-y-3 p-4 md:p-6">
-            <p className="text-xs uppercase tracking-[0.3em] text-primary">{t("dashboard_trending")}</p>
+            <p className="text-xs uppercase tracking-[0.3em] text-primary">
+              {t("dashboard_trending")}
+            </p>
             <h1 className="max-w-xl font-display text-3xl font-semibold text-foreground md:text-4xl">
               {hero.name}
             </h1>
             <p className="max-w-lg text-sm text-muted-foreground">
-              {[hero.year || null, ...hero.genres, hero.type === "tv" ? t("dashboard_series") : t("dashboard_films")]
+              {[
+                hero.year || null,
+                ...hero.genres,
+                hero.type === "tv" ? t("dashboard_series") : t("dashboard_films"),
+              ]
                 .filter(Boolean)
                 .join(" · ")}
             </p>
@@ -114,7 +129,9 @@ function Dashboard() {
       </section>
 
       <section className="space-y-4">
-        <h2 className="font-display text-xl font-semibold text-foreground">{t("dashboard_trending")}</h2>
+        <h2 className="font-display text-xl font-semibold text-foreground">
+          {t("dashboard_trending")}
+        </h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
           {trending.slice(0, 5).map((t) => (
             <TitleCard key={t.id} title={t} />
@@ -123,7 +140,9 @@ function Dashboard() {
       </section>
 
       <section className="space-y-4">
-        <h2 className="font-display text-xl font-semibold text-foreground">{t("dashboard_recentlyAdded")}</h2>
+        <h2 className="font-display text-xl font-semibold text-foreground">
+          {t("dashboard_recentlyAdded")}
+        </h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
           {latest.slice(0, 5).map((t) => (
             <TitleCard key={t.id} title={t} />

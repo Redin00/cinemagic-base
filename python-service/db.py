@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     password_hash   TEXT NOT NULL,
     role            TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member')),
     color           TEXT NOT NULL DEFAULT '#6366f1',
+    profile_picture TEXT,
     failed_attempts INTEGER NOT NULL DEFAULT 0,
     locked_until    INTEGER,
     created_at      INTEGER NOT NULL
@@ -62,6 +63,10 @@ CREATE TABLE IF NOT EXISTS watch_history (
     episode     INTEGER NOT NULL DEFAULT 0,
     snapshot    TEXT NOT NULL,
     watched_at  INTEGER NOT NULL,
+    -- Seconds watched in the most recent session for this slug/season/episode,
+    -- or 0 when nothing has been recorded yet. The dashboard seeks to this
+    -- position when playback starts and updates it as the user watches.
+    marker      INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (account_id, slug, season, episode)
 );
 CREATE INDEX IF NOT EXISTS history_account ON watch_history(account_id, watched_at DESC);
@@ -98,6 +103,15 @@ def init_db() -> None:
         # Persistent per file, so it only has to be set on the way in.
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
+        # Migrations for fields added after the initial deploy: safe to re-run.
+        try:
+            conn.execute("ALTER TABLE accounts ADD COLUMN profile_picture TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already present
+        try:
+            conn.execute("ALTER TABLE watch_history ADD COLUMN marker INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # column already present
     log.info("database ready at %s", DB_PATH)
 
 

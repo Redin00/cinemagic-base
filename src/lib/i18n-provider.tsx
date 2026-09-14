@@ -1,4 +1,12 @@
-import React, { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
 
 import { type Locale, LANGUAGES, DEFAULT_LOCALE, IT, EN } from "./i18n";
 
@@ -62,18 +70,15 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     setReady(true);
   }, []);
 
-  const setLocale = useCallback(
-    (newLocale: Locale) => {
-      if (!LANGUAGES.some((l) => l.code === newLocale)) return;
-      setLocaleState(newLocale);
-      try {
-        localStorage.setItem(STORAGE_KEY, newLocale);
-      } catch {
-        // localStorage unavailable
-      }
-    },
-    [],
-  );
+  const setLocale = useCallback((newLocale: Locale) => {
+    if (!LANGUAGES.some((l) => l.code === newLocale)) return;
+    setLocaleState(newLocale);
+    try {
+      localStorage.setItem(STORAGE_KEY, newLocale);
+    } catch {
+      // localStorage unavailable
+    }
+  }, []);
 
   const t = useCallback(
     (key: string) => {
@@ -103,9 +108,5 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     [locale, setLocale, ready],
   );
 
-  return (
-    <LocaleContext.Provider value={contextValue}>
-      {children}
-    </LocaleContext.Provider>
-  );
+  return <LocaleContext.Provider value={contextValue}>{children}</LocaleContext.Provider>;
 }

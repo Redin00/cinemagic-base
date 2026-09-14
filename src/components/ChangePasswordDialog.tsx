@@ -55,9 +55,7 @@ export function ChangePasswordDialog({
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>{t("changePassword_title")}</DialogTitle>
-          <DialogDescription>
-            {t("changePassword_success")}
-          </DialogDescription>
+          <DialogDescription>{t("changePassword_success")}</DialogDescription>
         </DialogHeader>
         <form onSubmit={(event) => void submit(event)} className="space-y-4">
           <div className="space-y-2">
@@ -93,10 +91,7 @@ export function ChangePasswordDialog({
             >
               {t("changePassword_cancel")}
             </Button>
-            <Button
-              type="submit"
-              disabled={busy || password.length < 6 || password !== confirm}
-            >
+            <Button type="submit" disabled={busy || password.length < 6 || password !== confirm}>
               {busy ? t("auth_loading") : t("changePassword_save")}
             </Button>
           </DialogFooter>

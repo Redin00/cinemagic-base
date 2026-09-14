@@ -1,11 +1,10 @@
-"""Accounts, sessions, and the admin-only account management API.
+"""Accounts, sessions, and the account management API.
 
 Passwords are PBKDF2-HMAC-SHA256 with a per-account salt. Session tokens are
 256-bit random strings of which only the sha256 is stored, so a copy of the
 database does not hand out usable sessions.
 
-Only the Admin creates accounts: there is no public registration route, and
-`/accounts/*` requires an admin token on top of the app's own server-side gate.
+Public registration creates member accounts. `/accounts/*` remains admin-only.
 """
 
 from __future__ import annotations
@@ -17,15 +16,31 @@ import os
 import re
 import secrets
 import sqlite3
+from pathlib import Path
 from typing import Any, Dict, List, Literal, NamedTuple, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Form, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, field_validator
+from PIL import Image
+from io import BytesIO
 
 from db import connect, now
 
 log = logging.getLogger("streaming-dashboard")
+
+UPLOAD_DIR = Path(os.environ.get("SC_UPLOAD_DIR", str(Path(__file__).parent / "uploads")))
+MAX_PROFILE_PICTURE_MB = int(os.environ.get("SC_MAX_PROFILE_PICTURE_MB", "2"))
+MAX_PROFILE_PICTURE_BYTES = MAX_PROFILE_PICTURE_MB * 1024 * 1024
+ALLOWED_PICTURE_MIME = frozenset({"image/jpeg", "image/png"})
+ALLOWED_PICTURE_EXT = frozenset({".jpg", ".jpeg", ".png"})
+ALLOWED_PICTURE_MIME_TYPES = frozenset({"image/jpeg", "image/png"})
+
+# Public base URL for profile picture links returned to the dashboard.
+# Set this to the public URL of the service when the browser cannot reach the
+# internal bind address (remote deploys, reverse proxy). Defaults to the
+# request's base_url for local dev convenience.
+SC_BASE_URL = os.environ.get("SC_BASE_URL")
 
 PBKDF2_ITERATIONS = 200_000
 SESSION_DAYS = int(os.environ.get("SC_SESSION_DAYS", "30"))
@@ -41,7 +56,6 @@ ADMIN_PASSWORD = os.environ.get("SC_ADMIN_PASSWORD")
 
 router = APIRouter()
 bearer = HTTPBearer(auto_error=False)
-
 
 # --------------------------------------------------------------------------- #
 # Passwords and tokens
@@ -75,20 +89,24 @@ def token_hash(token: str) -> str:
 
 def account_view(row: Dict[str, Any]) -> Dict[str, Any]:
     """The account fields a signed-in user or the picker is allowed to see."""
+    row = dict(row)
     return {
         "id": row["id"],
         "name": row["name"],
         "role": row["role"],
         "color": row["color"],
+        "profilePicture": row.get("profile_picture"),
     }
 
 
 def admin_account_view(row: Dict[str, Any]) -> Dict[str, Any]:
+    row = dict(row)
     return {
         **account_view(row),
         "lockedUntil": row["locked_until"],
         "createdAt": row["created_at"],
         "email": row["name"].lower().replace(" ", ".") + "@streamapp.local",
+        "profilePicture": row.get("profile_picture"),
     }
 
 
@@ -105,7 +123,7 @@ class Session(NamedTuple):
 def current_session(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
 ) -> Session:
-    """Resolve `Authorization: Bearer <token>` to a live session, or 401."""
+    """Resolve `Authorization: Bearer *** to a live session, or 401."""
     if credentials is None or credentials.scheme.lower() != "bearer" or not credentials.credentials:
         raise HTTPException(status_code=401, detail="Not signed in")
 
@@ -167,6 +185,7 @@ class AccountCreate(BaseModel):
     password: str = Field(min_length=6, max_length=200)
     role: Role = "member"
     color: str = DEFAULT_COLOR
+    profile_picture: Optional[str] = None
 
     @field_validator("name")
     @classmethod
@@ -179,10 +198,21 @@ class AccountCreate(BaseModel):
         return check_color(value)
 
 
+class RegistrationRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    password: str = Field(min_length=6, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def name_ok(cls, value: str) -> str:
+        return check_name(value)
+
+
 class AccountPatch(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=40)
     role: Optional[Role] = None
     color: Optional[str] = None
+    profile_picture: Optional[str] = None
     unlock: bool = False
 
     @field_validator("name")
@@ -198,6 +228,19 @@ class AccountPatch(BaseModel):
 
 class PasswordReset(BaseModel):
     password: str = Field(min_length=6, max_length=200)
+
+
+class ProfilePictureUrl(BaseModel):
+    picture: Optional[str] = Field(default=None, description="URL to an external image")
+
+    @field_validator("picture")
+    @classmethod
+    def picture_ok(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or value == "":
+            return None
+        if not (value.startswith("http://") or value.startswith("https://")):
+            raise ValueError("picture must be an https url")
+        return value
 
 
 def _locked(row: Dict[str, Any], stamp: int) -> bool:
@@ -219,13 +262,14 @@ def profiles() -> List[Dict[str, Any]]:
     stamp = now()
     with connect() as conn:
         rows = conn.execute(
-            "SELECT id, name, color, locked_until FROM accounts ORDER BY id"
+            "SELECT id, name, color, profile_picture, locked_until FROM accounts ORDER BY id"
         ).fetchall()
     return [
         {
             "id": row["id"],
             "name": row["name"],
             "color": row["color"],
+            "profilePicture": dict(row).get("profile_picture"),
             "locked": _locked(dict(row), stamp),
         }
         for row in rows
@@ -307,6 +351,27 @@ def login(body: LoginRequest) -> Dict[str, Any]:
     return outcome
 
 
+@router.post("/auth/register", status_code=201)
+def register(body: RegistrationRequest) -> Dict[str, Any]:
+    """Create a member account without requiring an existing session."""
+    try:
+        with connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO accounts (name, password_hash, role, color, created_at)
+                VALUES (?, ?, 'member', ?, ?)
+                """,
+                (body.name, hash_password(body.password), DEFAULT_COLOR, now()),
+            )
+            created = dict(
+                conn.execute("SELECT * FROM accounts WHERE id = ?", (cursor.lastrowid,)).fetchone()
+            )
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="An account with that name already exists")
+    log.info("created member account %r through public registration", created["name"])
+    return account_view(created)
+
+
 @router.post("/auth/logout", status_code=204)
 def logout(session: Session = Depends(current_session)) -> Response:
     with connect() as conn:
@@ -339,10 +404,10 @@ def create_account(
         with connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO accounts (name, password_hash, role, color, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO accounts (name, password_hash, role, color, profile_picture, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (body.name, hash_password(body.password), body.role, body.color, now()),
+                (body.name, hash_password(body.password), body.role, body.color, body.profile_picture, now()),
             )
             created = dict(
                 conn.execute("SELECT * FROM accounts WHERE id = ?", (cursor.lastrowid,)).fetchone()
@@ -373,6 +438,8 @@ def update_account(
                 conn.execute("UPDATE accounts SET role = ? WHERE id = ?", (body.role, account_id))
             if body.color is not None:
                 conn.execute("UPDATE accounts SET color = ? WHERE id = ?", (body.color, account_id))
+            if body.profile_picture is not None:
+                conn.execute("UPDATE accounts SET profile_picture = ? WHERE id = ?", (body.profile_picture, account_id))
             if body.unlock:
                 conn.execute(
                     "UPDATE accounts SET failed_attempts = 0, locked_until = NULL WHERE id = ?",
@@ -414,6 +481,105 @@ def change_own_password(
     return {"id": row["id"], "name": row["name"]}
 
 
+@router.post("/auth/me/picture")
+def change_own_picture_url(
+    body: ProfilePictureUrl, account: Dict[str, Any] = Depends(current_account)
+) -> Dict[str, Any]:
+    """A signed-in user can set their profile picture via a URL without admin involvement."""
+    with connect() as conn:
+        found = conn.execute("SELECT * FROM accounts WHERE id = ?", (account["id"],)).fetchone()
+        if found is None:
+            raise HTTPException(status_code=404, detail="No such account")
+
+        if body.picture is not None:
+            conn.execute(
+                "UPDATE accounts SET profile_picture = ? WHERE id = ?",
+                (body.picture, account["id"]),
+            )
+        else:
+            conn.execute(
+                "UPDATE accounts SET profile_picture = NULL WHERE id = ?",
+                (account["id"],),
+            )
+
+        row = dict(conn.execute("SELECT * FROM accounts WHERE id = ?", (account["id"],)).fetchone())
+
+    log.info("account %r set their profile picture via URL", row["name"])
+    return {"id": row["id"], "profilePicture": row.get("profile_picture")}
+
+
+@router.post("/auth/me/picture/upload")
+def change_own_picture_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    account: Dict[str, Any] = Depends(current_account),
+) -> Dict[str, Any]:
+    """A signed-in user can upload a profile picture file (JPEG or PNG, max 2 MB)."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    # Validate extension before reading content.
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_PICTURE_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_PICTURE_EXT))}",
+        )
+
+    contents = file.file.read(MAX_PROFILE_PICTURE_BYTES + 1)
+    if len(contents) > MAX_PROFILE_PICTURE_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum is {MAX_PROFILE_PICTURE_MB} MB",
+        )
+
+    # Validate it's a real image via Pillow.
+    try:
+        img = Image.open(BytesIO(contents))
+        img.load()
+        if img.format not in ("JPEG", "PNG"):
+            raise HTTPException(status_code=400, detail="File does not appear to be a valid JPEG or PNG image")
+        # Normalise to RGB for JPEG compatibility and constrain size.
+        max_dim = 512
+        if img.width > max_dim or img.height > max_dim:
+            ratio = min(max_dim / img.width, max_dim / img.height)
+            new_size = (int(img.width * ratio), int(img.height * ratio))
+            img = img.resize(new_size, Image.LANCZOS)
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="File is not a readable image") from exc
+
+    # Save the file.
+    out_dir = UPLOAD_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stored_name = f"{account['id']}{ext}"
+    out_path = out_dir / stored_name
+    img.save(out_path, format=img.format, optimize=True)
+
+    # Build the public URL the dashboard will use.
+    # Strip trailing slash so the user can set SC_BASE_URL with or without one.
+    base = (SC_BASE_URL or f"{request.base_url.scheme}://{request.base_url.netloc}").rstrip("/")
+    picture_url = f"{base}/profile-pictures/{stored_name}"
+
+    with connect() as conn:
+        found = conn.execute("SELECT * FROM accounts WHERE id = ?", (account["id"],)).fetchone()
+        if found is None:
+            # Unlikely — the account is already authenticated — but guard anyway.
+            out_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=404, detail="No such account")
+
+        conn.execute(
+            "UPDATE accounts SET profile_picture = ? WHERE id = ?",
+            (picture_url, account["id"]),
+        )
+
+        row = dict(conn.execute("SELECT * FROM accounts WHERE id = ?", (account["id"],)).fetchone())
+
+    log.info("account %r uploaded a profile picture", row["name"])
+    return {"id": row["id"], "profilePicture": row.get("profile_picture")}
+
+
 @router.post("/accounts/{account_id}/password")
 def reset_password(
     account_id: int, body: PasswordReset, _: Dict[str, Any] = Depends(require_admin)
@@ -437,6 +603,99 @@ def reset_password(
 
     log.info("reset the password for account %r", row["name"])
     return {"id": row["id"], "name": row["name"]}
+
+
+@router.post("/accounts/{account_id}/picture")
+def admin_set_picture_url(
+    account_id: int,
+    body: ProfilePictureUrl,
+    _: Dict[str, Any] = Depends(require_admin),
+) -> Dict[str, Any]:
+    """An admin can set any user's profile picture via a URL."""
+    with connect() as conn:
+        found = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
+        if found is None:
+            raise HTTPException(status_code=404, detail="No such account")
+
+        if body.picture is not None:
+            conn.execute(
+                "UPDATE accounts SET profile_picture = ? WHERE id = ?",
+                (body.picture, account_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE accounts SET profile_picture = NULL WHERE id = ?",
+                (account_id,),
+            )
+
+        row = dict(conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone())
+
+    log.info("admin set profile picture URL for account %r", row["name"])
+    return {"id": row["id"], "profilePicture": row.get("profile_picture")}
+
+
+@router.post("/accounts/{account_id}/picture/upload")
+def admin_set_picture_upload(
+    request: Request,
+    account_id: int,
+    file: UploadFile = File(...),
+    _: Dict[str, Any] = Depends(require_admin),
+) -> Dict[str, Any]:
+    """An admin can upload a profile picture file for any user (JPEG/PNG, max 2 MB)."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_PICTURE_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_PICTURE_EXT))}",
+        )
+
+    contents = file.file.read(MAX_PROFILE_PICTURE_BYTES + 1)
+    if len(contents) > MAX_PROFILE_PICTURE_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum is {MAX_PROFILE_PICTURE_MB} MB",
+        )
+
+    try:
+        img = Image.open(BytesIO(contents))
+        img.load()
+        if img.format not in ("JPEG", "PNG"):
+            raise HTTPException(status_code=400, detail="File does not appear to be a valid JPEG or PNG image")
+        max_dim = 512
+        if img.width > max_dim or img.height > max_dim:
+            ratio = min(max_dim / img.width, max_dim / img.height)
+            new_size = (int(img.width * ratio), int(img.height * ratio))
+            img = img.resize(new_size, Image.LANCZOS)
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="File is not a readable image") from exc
+
+    with connect() as conn:
+        found = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
+        if found is None:
+            raise HTTPException(status_code=404, detail="No such account")
+
+        stored_name = f"{account_id}{ext}"
+        out_path = UPLOAD_DIR / stored_name
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        img.save(out_path, format=img.format, optimize=True)
+        # Strip trailing slash so the user can set SC_BASE_URL with or without one.
+        base = (SC_BASE_URL or f"{request.base_url.scheme}://{request.base_url.netloc}").rstrip("/")
+        picture_url = f"{base}/profile-pictures/{stored_name}"
+
+        conn.execute(
+            "UPDATE accounts SET profile_picture = ? WHERE id = ?",
+            (picture_url, account_id),
+        )
+
+        row = dict(conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone())
+
+    log.info("admin uploaded profile picture for account %r", row["name"])
+    return {"id": row["id"], "profilePicture": row.get("profile_picture")}
 
 
 @router.delete("/accounts/{account_id}", status_code=204)

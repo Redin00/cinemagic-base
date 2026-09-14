@@ -1,6 +1,7 @@
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { formatDistanceToNow } from "date-fns";
+import { formatWatchPosition } from "@/lib/library.functions";
 import { useState } from "react";
 import { useTranslation } from "@/lib/i18n-hook";
 
@@ -70,10 +71,10 @@ function LibraryPage() {
   if (!history && !library) {
     return (
       <div className="space-y-4">
-        <h1 className="font-display text-3xl font-semibold text-foreground">{t("library_title")}</h1>
-        <p className="text-sm text-muted-foreground">
-          {t("misc_error")}
-        </p>
+        <h1 className="font-display text-3xl font-semibold text-foreground">
+          {t("library_title")}
+        </h1>
+        <p className="text-sm text-muted-foreground">{t("misc_error")}</p>
       </div>
     );
   }
@@ -81,16 +82,18 @@ function LibraryPage() {
   return (
     <div className="space-y-12">
       <div>
-        <h1 className="font-display text-3xl font-semibold text-foreground">{t("library_title")}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("library_emptySub")}
-        </p>
+        <h1 className="font-display text-3xl font-semibold text-foreground">
+          {t("library_title")}
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">{t("library_emptySub")}</p>
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
       <section className="space-y-4">
-        <h2 className="font-display text-lg font-semibold text-foreground">{t("library_myList")}</h2>
+        <h2 className="font-display text-lg font-semibold text-foreground">
+          {t("library_myList")}
+        </h2>
         {library && library.length > 0 ? (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
             {library.map((item) => (
@@ -114,14 +117,14 @@ function LibraryPage() {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">
-            {t("library_noWatchlistSub")}
-          </p>
+          <p className="text-sm text-muted-foreground">{t("library_noWatchlistSub")}</p>
         )}
       </section>
 
       <section className="space-y-4">
-        <h2 className="font-display text-lg font-semibold text-foreground">{t("library_recentlyWatched")}</h2>
+        <h2 className="font-display text-lg font-semibold text-foreground">
+          {t("library_recentlyWatched")}
+        </h2>
         {history && history.length > 0 ? (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
             {history.map((entry) => (
@@ -131,6 +134,11 @@ function LibraryPage() {
                   <p className="truncate text-[11px] text-muted-foreground">
                     {formatDistanceToNow(entry.watchedAt, { addSuffix: true })}
                   </p>
+                  {entry.marker > 0 ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      {formatWatchPosition(entry.marker)}
+                    </p>
+                  ) : null}
                   <Button
                     variant="ghost"
                     size="sm"
@@ -145,9 +153,7 @@ function LibraryPage() {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">
-            {t("library_noHistorySub")}
-          </p>
+          <p className="text-sm text-muted-foreground">{t("library_noHistorySub")}</p>
         )}
       </section>
     </div>

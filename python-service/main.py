@@ -1,5 +1,4 @@
-"""
-Streaming dashboard backend service.
+"""Streaming dashboard backend service.
 
 Wraps the `streamingcommunity-unofficialapi` (scuapi) Python library and exposes
 the JSON endpoints the web dashboard expects:
@@ -19,6 +18,7 @@ Accounts and per-account state (see auth.py and library.py):
     POST   /auth/login              -> { "token", "account" }
     POST   /auth/logout             -> 204
     GET    /auth/me                 -> the signed-in account
+    POST   /auth/me/picture         -> upload a profile picture (multipart)
     GET    /accounts                -> admin only
     POST   /accounts                -> admin only
     PATCH  /accounts/{id}           -> admin only
@@ -30,25 +30,30 @@ Accounts and per-account state (see auth.py and library.py):
     GET    /history?limit=24        -> recently watched
     POST   /history                 -> record a play
 
+Static profile picture storage:
+
+    GET    /profile-pictures/{filename}  -> the uploaded image
+
 Run:
+
     pip install -r requirements.txt
     SC_DOMAIN=streaming.example uvicorn main:app --reload --port 8000
 
 Then point the dashboard at it:  STREAMING_API_URL=http://localhost:8000
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import os
 import re
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from scuapi import API
 
 from auth import bootstrap_admin
@@ -89,6 +94,16 @@ vixsrc_session.headers["user-agent"] = api.user_agent
 # payload it would otherwise render; without it we would have to parse its HTML.
 JSON_HEADERS = {"user-agent": api.user_agent, "accept": "application/json"}
 
+# Where uploaded profile pictures are stored (defaults to an `uploads` folder beside this file).
+_PROFILE_PICTURES_DIR = Path(os.environ.get("SC_PROFILE_PICTURES_DIR", str(Path(__file__).parent / "uploads")))
+_PROFILE_PICTURES_DIR.mkdir(parents=True, exist_ok=True)
+
+# Public base URL for profile picture links returned to the dashboard.
+# Set this to the public URL of the service (e.g. "https://api.example.com") when
+# the browser cannot reach the internal bind address (remote deploys, reverse proxy).
+# Defaults to the request's base_url for local dev convenience.
+SC_BASE_URL = os.environ.get("SC_BASE_URL")
+
 app = FastAPI(title="StreamApp - Rdn API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
@@ -99,6 +114,13 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.include_router(library_router)
+
+# Serve uploaded profile pictures under the /profile-pictures path.
+app.mount(
+    "/profile-pictures",
+    StaticFiles(directory=str(_PROFILE_PICTURES_DIR), follow_symlink=True),
+    name="profile_pictures",
+)
 
 # Import time, so the schema and the first admin exist before the first request.
 init_db()
@@ -155,7 +177,7 @@ def _year(raw: Any) -> int:
 
 
 def _score(raw: Any) -> float:
-    """The library returns `rating` as score*1000; the site's raw score is 0-10."""
+    """The library returns `rating` as score*1000; the sites raw score is 0-10."""
     if raw in (None, ""):
         return 0.0
     value = float(raw)
@@ -175,7 +197,7 @@ def _genres(item: Dict[str, Any]) -> List[str]:
 
 
 def summary_from_browse(item: Dict[str, Any]) -> Dict[str, Any]:
-    """Map a raw title object coming from the site's JSON API to TitleSummary."""
+    """Map a raw title object coming from the sites JSON API to TitleSummary."""
     return {
         "id": item.get("id") or 0,
         "slug": f"{item.get('id')}-{item.get('slug')}" if item.get("slug") else str(item.get("id")),
@@ -190,8 +212,31 @@ def summary_from_browse(item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _extract_cast(data: Dict[str, Any]) -> List[str]:
+    """Pull cast/crew names from the raw title payload the sites JSON carries.
+
+    The upstream JSON nests credits under ``props.title.credits`` as a list of
+    ``{name, role}`` dicts when it is available. When that path is absent (older
+    pages, some genres) fall back to an empty list so the dashboard can still
+    render the rest of the detail page.
+    """
+    credits = (
+        data.get("props", {})
+        .get("title", {})
+        .get("credits")
+    )
+    if not isinstance(credits, list):
+        return []
+    names: List[str] = []
+    for entry in credits:
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if name and isinstance(name, str):
+            names.append(name.strip())
+    return names
+
+
 def detail_from_load(slug: str, data: Dict[str, Any]) -> Dict[str, Any]:
-    """Map `API.load()` output to the dashboard's TitleDetail shape."""
+    """Map `API.load()` output to the dashboard TitleDetail shape."""
     media_type = _type(data.get("type"))
 
     seasons: List[Dict[str, Any]] = []
@@ -232,7 +277,7 @@ def detail_from_load(slug: str, data: Dict[str, Any]) -> Dict[str, Any]:
         "quality": "HD",
         "runtime": runtime or 0,
         "status": "Series" if media_type == "tv" else "Released",
-        "cast": [],
+        "cast": _extract_cast(data) or [],
         "trailerUrl": data.get("trailerUrl"),
         # External ids drive playback: the embed host is keyed by TMDB id.
         "tmdbId": data.get("tmdb_id"),
@@ -242,9 +287,9 @@ def detail_from_load(slug: str, data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def browse(slider: str, limit: int = 24) -> List[Dict[str, Any]]:
-    """Fetch one of the site's listing sliders (trending / latest / top10 / genre).
+    """Fetch one of the site listing sliders (trending / latest / top10 / genre).
 
-    The site is a Laravel app that returns a page's render payload as JSON when
+    The site is a Laravel app that returns a page render payload as JSON when
     asked for `application/json`. That is the only listing API reachable without
     credentials: `api/tv/browse` answers 401 and the library has no browse method.
     """
@@ -273,7 +318,7 @@ def browse(slider: str, limit: int = 24) -> List[Dict[str, Any]]:
 
 
 def archive_total(media_type: Optional[str] = None) -> int:
-    """Exact catalogue size, from the paginated archive endpoint the site's UI uses."""
+    """Exact catalogue size, from the paginated archive endpoint the site UI uses."""
     url = f"https://{SC_DOMAIN}/it/archive"
     params = {"type": media_type} if media_type else {}
     log.debug("archive GET %s params=%s", url, params)

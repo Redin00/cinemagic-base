@@ -15,7 +15,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field, field_validator
 
-from auth import current_account
+from auth import current_account, require_admin
 from db import clean_snapshot, connect, now, parse_snapshot
 
 log = logging.getLogger("streaming-dashboard")
@@ -39,6 +39,12 @@ class HistoryRecord(SnapshotBody):
     # 0 for films; a series stores the season and episode that were played.
     season: int = Field(default=0, ge=0, le=1000)
     episode: int = Field(default=0, ge=0, le=10000)
+
+
+class MarkerUpdate(SnapshotBody):
+    season: int = Field(default=0, ge=0, le=1000)
+    episode: int = Field(default=0, ge=0, le=10000)
+    marker: int = Field(default=0, ge=0, le=2_147_483_647)
 
 
 @router.get("/library")
@@ -84,6 +90,25 @@ def remove_from_library(slug: str, account: Dict[str, Any] = Depends(current_acc
     return Response(status_code=204)
 
 
+@router.get("/library/{slug}")
+def get_library_item(
+    slug: str, account: Dict[str, Any] = Depends(current_account)
+) -> Dict[str, Any] | None:
+    """Return a single saved library item, or null when it is not in the library."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT slug, snapshot, added_at FROM library_items WHERE account_id = ? AND slug = ?",
+            (account["id"], slug),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "slug": row["slug"],
+        "title": parse_snapshot(row["snapshot"]),
+        "addedAt": row["added_at"],
+    }
+
+
 @router.delete("/history/{slug}", status_code=204)
 def remove_from_history(
     slug: str,
@@ -107,7 +132,7 @@ def list_history(
     with connect() as conn:
         rows = conn.execute(
             """
-            SELECT slug, season, episode, snapshot, watched_at FROM watch_history
+            SELECT slug, season, episode, snapshot, watched_at, marker FROM watch_history
             WHERE account_id = ? ORDER BY watched_at DESC, rowid DESC LIMIT ?
             """,
             (account["id"], limit),
@@ -119,9 +144,35 @@ def list_history(
             "episode": row["episode"],
             "title": parse_snapshot(row["snapshot"]),
             "watchedAt": row["watched_at"],
+            "marker": row["marker"],
         }
         for row in rows
     ]
+
+
+@router.get("/history/{slug}")
+def get_history_entry(
+    slug: str,
+    season: int = Query(0, ge=0, le=1000),
+    episode: int = Query(0, ge=0, le=10000),
+    account: Dict[str, Any] = Depends(current_account),
+) -> Dict[str, Any] | None:
+    """Return the watch-history entry for one slug/season/episode, including marker."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT slug, season, episode, snapshot, watched_at, marker FROM watch_history WHERE account_id = ? AND slug = ? AND season = ? AND episode = ?",
+            (account["id"], slug, season, episode),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "slug": row["slug"],
+        "season": row["season"],
+        "episode": row["episode"],
+        "title": parse_snapshot(row["snapshot"]),
+        "watchedAt": row["watched_at"],
+        "marker": row["marker"],
+    }
 
 
 @router.post("/history")
@@ -154,3 +205,70 @@ def record_history(
         body.episode,
     )
     return {"slug": body.slug, "season": body.season, "episode": body.episode, "watchedAt": stamp}
+
+
+@router.post("/history/marker")
+def update_marker(
+    body: MarkerUpdate, account: Dict[str, Any] = Depends(current_account)
+) -> Dict[str, Any]:
+    """Store how many seconds of one slug/season/episode the account has watched.
+
+    Upsert: a new play creates the row if it does not exist yet.
+    """
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO watch_history (account_id, slug, season, episode, snapshot, watched_at, marker)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(account_id, slug, season, episode)
+            DO UPDATE SET marker = excluded.marker
+            """,
+            (
+                account["id"],
+                body.slug,
+                body.season,
+                body.episode,
+                clean_snapshot(body.snapshot),
+                now(),
+                body.marker,
+            ),
+        )
+    return {"slug": body.slug, "season": body.season, "episode": body.episode, "marker": body.marker}
+
+
+@router.delete("/history/marker/{slug}", status_code=204)
+def remove_marker(
+    slug: str,
+    season: int = Query(0, ge=0, le=1000),
+    episode: int = Query(0, ge=0, le=10000),
+    account: Dict[str, Any] = Depends(current_account),
+) -> Response:
+    """Clear the resume marker for one slug/season/episode, keeping the history row."""
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE watch_history
+            SET marker = 0
+            WHERE account_id = ? AND slug = ? AND season = ? AND episode = ?
+            """,
+            (account["id"], slug, season, episode),
+        )
+    return Response(status_code=204)
+
+
+@router.delete("/history/clear-all", status_code=204)
+def clear_all_history(_: Dict[str, Any] = Depends(require_admin)) -> Response:
+    """Admin: wipe every account's watch history (markers and rows alike)."""
+    with connect() as conn:
+        conn.execute("DELETE FROM watch_history")
+    log.info("admin cleared all watch history")
+    return Response(status_code=204)
+
+
+@router.delete("/library/clear-all", status_code=204)
+def clear_all_library(_: Dict[str, Any] = Depends(require_admin)) -> Response:
+    """Admin: wipe every account's saved library."""
+    with connect() as conn:
+        conn.execute("DELETE FROM library_items")
+    log.info("admin cleared all library items")
+    return Response(status_code=204)

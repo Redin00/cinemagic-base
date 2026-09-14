@@ -31,7 +31,7 @@ const COLOR_RESET = "\x1b[0m";
 
 function log(source, color, msg) {
   const prefix = source ? `${color}[${source}]${COLOR_RESET} ` : "";
-  // eslint-disable-next-line no-console
+
   console.log(`${prefix}${msg}`);
 }
 

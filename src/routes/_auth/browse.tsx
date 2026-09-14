@@ -65,7 +65,11 @@ function Browse() {
                 : "border-border text-muted-foreground hover:border-primary/50"
             }`}
           >
-            {f === "all" ? t("browse_all") : f === "movie" ? t("dashboard_films") : t("dashboard_series")}
+            {f === "all"
+              ? t("browse_all")
+              : f === "movie"
+                ? t("dashboard_films")
+                : t("dashboard_series")}
           </button>
         ))}
         {hasGenres ? (

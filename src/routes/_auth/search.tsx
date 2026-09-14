@@ -14,7 +14,8 @@ export const Route = createFileRoute("/_auth/search")({
       { title: "Search Titles - StreamApp - Rdn" },
       {
         name: "description",
-        content: "Search films and series by name or genre and open full details, seasons and episodes.",
+        content:
+          "Search films and series by name or genre and open full details, seasons and episodes.",
       },
       { property: "og:title", content: "Search Titles - StreamApp - Rdn" },
       {
@@ -44,9 +45,7 @@ function SearchPage() {
         <h1 className="font-display text-3xl font-semibold text-foreground">
           {t("search_search")}
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("search_placeholder")}
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">{t("search_placeholder")}</p>
       </div>
 
       <form
@@ -74,9 +73,7 @@ function SearchPage() {
         </button>
       </form>
 
-      {isFetching ? (
-        <p className="text-sm text-muted-foreground">{t("search_searching")}</p>
-      ) : null}
+      {isFetching ? <p className="text-sm text-muted-foreground">{t("search_searching")}</p> : null}
 
       {data && data.length === 0 ? (
         <p className="text-sm text-muted-foreground">

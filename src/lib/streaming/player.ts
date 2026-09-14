@@ -5,6 +5,7 @@ export interface EmbedTarget {
   type: TitleType;
   season?: number | undefined;
   episode?: number | undefined;
+  startAt?: number | undefined;
 }
 
 /**
@@ -16,10 +17,17 @@ export function buildEmbedUrl(config: PlayerConfig, target: EmbedTarget): string
 
   const host = config.domain.replace(/^https?:\/\//, "").replace(/\/+$/, "");
 
+  let path: string;
   if (target.type === "tv") {
     if (!target.season || !target.episode) return null;
-    return `https://${host}/tv/${target.tmdbId}/${target.season}/${target.episode}`;
+    path = `/tv/${target.tmdbId}/${target.season}/${target.episode}`;
+  } else {
+    path = `/movie/${target.tmdbId}`;
   }
 
-  return `https://${host}/movie/${target.tmdbId}`;
+  const url = new URL(path, `https://${host}`);
+  if (target.startAt !== undefined && target.startAt > 0) {
+    url.searchParams.set("startAt", String(Math.floor(target.startAt)));
+  }
+  return url.toString();
 }

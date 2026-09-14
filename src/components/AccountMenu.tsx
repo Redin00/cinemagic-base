@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useRouter } from "@tanstack/react-router";
-import { BookMarked, ChevronDown, KeyRound, LogOut, Shield, Users } from "lucide-react";
+import { BookMarked, Camera, ChevronDown, KeyRound, LogOut, Shield, Users } from "lucide-react";
 import { useTranslation } from "@/lib/i18n-hook";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
+import { UploadProfilePictureDialog } from "@/components/UploadProfilePictureDialog";
 import { logout } from "@/lib/auth.functions";
 import { historyQuery, libraryQuery, viewerQuery } from "@/lib/auth/queries";
 import type { Viewer } from "@/lib/auth/types";
@@ -22,6 +23,7 @@ export function AccountMenu({ viewer }: { viewer: Viewer }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [openChangePassword, setOpenChangePassword] = useState(false);
+  const [openProfilePicture, setOpenProfilePicture] = useState(false);
   const { t } = useTranslation();
 
   async function signOut() {
@@ -37,14 +39,24 @@ export function AccountMenu({ viewer }: { viewer: Viewer }) {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-full outline-none ring-primary focus-visible:ring-2">
-          <Avatar className="size-8">
-            <AvatarFallback
-              style={{ backgroundColor: viewer.color }}
-              className="text-xs font-semibold text-white"
-            >
-              {viewer.name.slice(0, 1).toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
+          {viewer.profilePicture ? (
+            <Avatar className="size-8">
+              <img
+                src={viewer.profilePicture}
+                alt={viewer.name}
+                className="aspect-square h-full w-full rounded-full object-cover"
+              />
+            </Avatar>
+          ) : (
+            <Avatar className="size-8">
+              <AvatarFallback
+                style={{ backgroundColor: viewer.color }}
+                className="text-xs font-semibold text-white"
+              >
+                {viewer.name.slice(0, 1).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+          )}
           <ChevronDown className="size-4 text-muted-foreground" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
@@ -70,6 +82,10 @@ export function AccountMenu({ viewer }: { viewer: Viewer }) {
             <KeyRound className="size-4" />
             {t("account_changePassword")}
           </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setOpenProfilePicture(true)}>
+            <Camera className="size-4" />
+            {t("uploadProfilePicture_title")}
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => void router.navigate({ to: "/login" })}>
             <Users className="size-4" />
@@ -81,9 +97,12 @@ export function AccountMenu({ viewer }: { viewer: Viewer }) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <ChangePasswordDialog
-        open={openChangePassword}
-        onOpenChange={setOpenChangePassword}
+      <ChangePasswordDialog open={openChangePassword} onOpenChange={setOpenChangePassword} />
+      <UploadProfilePictureDialog
+        open={openProfilePicture}
+        onOpenChange={setOpenProfilePicture}
+        currentPicture={viewer.profilePicture}
+        name={viewer.name}
       />
     </>
   );

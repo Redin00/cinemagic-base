@@ -1,9 +1,7 @@
 import type { LibraryStats, TitleDetail, TitleSummary } from "./types";
 
-const poster = (seed: string) =>
-  `https://picsum.photos/seed/${seed}/400/600`;
-const backdrop = (seed: string) =>
-  `https://picsum.photos/seed/${seed}-bg/1200/675`;
+const poster = (seed: string) => `https://picsum.photos/seed/${seed}/400/600`;
+const backdrop = (seed: string) => `https://picsum.photos/seed/${seed}-bg/1200/675`;
 
 const base: Omit<TitleDetail, "posterUrl" | "backdropUrl">[] = [
   {
@@ -213,17 +211,14 @@ export const toSummary = (t: TitleDetail): TitleSummary => ({
 
 export const mockStats = (): LibraryStats => {
   const genres = new Map<string, number>();
-  for (const t of mockTitles)
-    for (const g of t.genres) genres.set(g, (genres.get(g) ?? 0) + 1);
+  for (const t of mockTitles) for (const g of t.genres) genres.set(g, (genres.get(g) ?? 0) + 1);
 
   return {
     totalTitles: mockTitles.length,
     movies: mockTitles.filter((t) => t.type === "movie").length,
     series: mockTitles.filter((t) => t.type === "tv").length,
     averageScore:
-      Math.round(
-        (mockTitles.reduce((a, t) => a + t.score, 0) / mockTitles.length) * 10,
-      ) / 10,
+      Math.round((mockTitles.reduce((a, t) => a + t.score, 0) / mockTitles.length) * 10) / 10,
     genreBreakdown: [...genres.entries()]
       .map(([genre, count]) => ({ genre, count }))
       .sort((a, b) => b.count - a.count),

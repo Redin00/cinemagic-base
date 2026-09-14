@@ -7,7 +7,7 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { type ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 
 import appCss from "../styles.css?url";
 import { LanguageProvider } from "../lib/i18n-provider";
@@ -35,8 +35,11 @@ function NotFoundComponent() {
 }
 
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
-  console.error(error);
   const router = useRouter();
+  const diag =
+    typeof window !== "undefined"
+      ? ((window as unknown as { __HERMES_ERROR_DUMP__?: string }).__HERMES_ERROR_DUMP__ ?? "")
+      : "";
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -44,6 +47,9 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
         <h1 className="text-xl font-semibold tracking-tight text-foreground">
           This page didn't load
         </h1>
+        <pre className="mt-2 text-left text-xs text-destructive bg-muted/50 p-3 rounded mb-3 max-h-48 overflow-auto">
+          {diag || error.message}
+        </pre>
         <p className="mt-2 text-sm text-muted-foreground">
           Something went wrong on our end. You can try refreshing or head back home.
         </p>
@@ -128,6 +134,26 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+
+  useEffect(() => {
+    const diag: string[] = [];
+    const capture = (e: unknown) => {
+      const msg = e instanceof Error ? (e.stack ?? e.message) : String(e);
+      diag.push(msg.slice(0, 2000));
+    };
+    const onErr = (ev: Event) => capture((ev as ErrorEvent).error);
+    const onRej = (ev: PromiseRejectionEvent) => capture(ev.reason);
+    window.addEventListener("error", onErr);
+    window.addEventListener("unhandledrejection", onRej);
+    return () => {
+      window.removeEventListener("error", onErr);
+      window.removeEventListener("unhandledrejection", onRej);
+      if (diag.length) {
+        (window as unknown as Record<string, string>)["__HERMES_ERROR_DUMP__"] = diag.join("\n\n");
+        setTimeout(() => window.location.reload(), 150);
+      }
+    };
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

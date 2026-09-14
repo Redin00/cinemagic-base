@@ -111,6 +111,10 @@ export const getStreamSource = createServerFn({ method: "GET" })
     const query = new URLSearchParams({ tmdb: String(data.tmdbId), type: data.type });
     if (data.season) query.set("s", String(data.season));
     if (data.episode) query.set("e", String(data.episode));
-    // No mock fallback here: `null` tells the watch route to use the embed iframe.
-    return upstream<StreamSource>(`/stream?${query}`);
+    // Direct HLS resolution happens from the Python service, so a failure may
+    // be caused by the service host being blocked even when the browser embed
+    // still works. Return null so the watch page can use its iframe fallback.
+    const live = await upstream<StreamSource>(`/stream?${query}`);
+    if (live) return live;
+    return null;
   });

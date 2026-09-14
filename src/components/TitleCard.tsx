@@ -33,9 +33,7 @@ export function TitleCard({ title, badge }: { title: TitleSummary; badge?: strin
         ) : null}
       </div>
       <div className="space-y-1 p-3">
-        <h3 className="truncate text-sm font-semibold text-card-foreground">
-          {title.name}
-        </h3>
+        <h3 className="truncate text-sm font-semibold text-card-foreground">{title.name}</h3>
         <p className="truncate text-xs text-muted-foreground">
           {[title.year || null, ...title.genres.slice(0, 2)].filter(Boolean).join(" · ")}
         </p>

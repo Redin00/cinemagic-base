@@ -1,12 +1,13 @@
 import { queryOptions, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { KeyRound, LockOpen, Pencil, Trash2, UserPlus } from "lucide-react";
+import { KeyRound, LockOpen, Pencil, Trash2, UserPlus, Camera, Loader2 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useTranslation } from "@/lib/i18n-hook";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { UploadProfilePictureDialog } from "@/components/UploadProfilePictureDialog";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +16,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -32,6 +43,10 @@ import {
   resetPassword,
   updateAccount,
 } from "@/lib/auth.functions";
+import {
+  clearAllHistory,
+  clearAllLibrary,
+} from "@/lib/library.functions";
 import type { AccountRow, Role } from "@/lib/auth/types";
 
 const accountsQuery = queryOptions({
@@ -66,6 +81,9 @@ function AdminPage() {
   const [editing, setEditing] = useState<AccountRow | null>(null);
   const [resetting, setResetting] = useState<AccountRow | null>(null);
   const [deleting, setDeleting] = useState<AccountRow | null>(null);
+  const [pictureing, setPictureing] = useState<AccountRow | null>(null);
+  const [clearingAll, setClearingAll] = useState(false);
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function refresh() {
@@ -93,10 +111,17 @@ function AdminPage() {
     const password = (form.elements.namedItem("password") as HTMLInputElement).value;
     const role = (form.elements.namedItem("role") as HTMLSelectElement).value as Role;
     const color = (form.elements.namedItem("color") as HTMLInputElement).value;
+    const profilePicture = (form.elements.namedItem("profilePicture") as HTMLInputElement).value;
 
     const ok = await act(async () => {
       const result = await createAccount({
-        data: { name, password, role, color: color || DEFAULT_COLOR },
+        data: {
+          name,
+          password,
+          role,
+          color: color || DEFAULT_COLOR,
+          profilePicture: profilePicture || undefined,
+        },
       });
       if (!result.ok) return result;
       await refresh();
@@ -113,10 +138,16 @@ function AdminPage() {
     const form = event.currentTarget;
     const name = (form.elements.namedItem("name") as HTMLInputElement).value.trim();
     const color = (form.elements.namedItem("color") as HTMLInputElement).value;
+    const profilePicture = (form.elements.namedItem("profilePicture") as HTMLInputElement).value;
 
     const ok = await act(async () => {
       const result = await updateAccount({
-        data: { id: editing.id, name, color: color || undefined },
+        data: {
+          id: editing.id,
+          name,
+          color: color || undefined,
+          profilePicture: profilePicture || undefined,
+        },
       });
       if (!result.ok) return result;
       setEditing(null);
@@ -137,6 +168,26 @@ function AdminPage() {
       return result;
     });
     if (!ok) return;
+    setError(null);
+  }
+
+  async function handleClearAllData() {
+    setClearingAll(true);
+    setError(null);
+    const historyResult = await clearAllHistory();
+    const libraryResult = await clearAllLibrary();
+    if (!historyResult.ok || !libraryResult.ok) {
+      setError(
+        historyResult.ok
+          ? libraryResult.message
+          : historyResult.message ??
+          t("misc_error"),
+      );
+      setClearingAll(false);
+      return;
+    }
+    await refresh();
+    setClearingAll(false);
     setError(null);
   }
 
@@ -165,11 +216,35 @@ function AdminPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-3xl font-semibold text-foreground">{t("admin_title")}</h1>
-        <Button type="button" size="sm" onClick={() => setCreating(true)} className="gap-2">
-          <UserPlus className="size-4" />
-          {t("admin_addUser")}
-        </Button>
+        <h1 className="font-display text-3xl font-semibold text-foreground">
+          {t("admin_title")}
+        </h1>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setClearDialogOpen(true)}
+            disabled={clearingAll}
+            className="gap-2 text-destructive hover:bg-destructive/10"
+          >
+            {clearingAll ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Trash2 className="size-4" />
+            )}
+            {t("admin_clearAllData")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => setCreating(true)}
+            className="gap-2"
+          >
+            <UserPlus className="size-4" />
+            {t("admin_addUser")}
+          </Button>
+        </div>
       </div>
 
       {error ? (
@@ -193,18 +268,32 @@ function AdminPage() {
                 <TableCell>
                   <div className="flex items-center gap-2">
                     <Avatar className="size-8">
-                      <AvatarFallback style={{ backgroundColor: account.color }}>
-                        {account.name.slice(0, 1).toUpperCase()}
-                      </AvatarFallback>
+                      {account.profilePicture ? (
+                        <img
+                          src={account.profilePicture}
+                          alt={account.name}
+                          className="aspect-square h-full w-full rounded-full object-cover"
+                        />
+                      ) : (
+                        <AvatarFallback
+                          style={{ backgroundColor: account.color }}
+                        >
+                          {account.name.slice(0, 1).toUpperCase()}
+                        </AvatarFallback>
+                      )}
                     </Avatar>
                     <div>
                       <div className="text-sm font-medium">{account.name}</div>
-                      <div className="text-xs text-muted-foreground">{displayEmail(account)}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {displayEmail(account)}
+                      </div>
                     </div>
                   </div>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={account.role === "admin" ? "default" : "secondary"}>
+                  <Badge
+                    variant={account.role === "admin" ? "default" : "secondary"}
+                  >
                     {account.role === "admin" ? t("admin_admin") : t("admin_viewer")}
                   </Badge>
                 </TableCell>
@@ -237,6 +326,15 @@ function AdminPage() {
                     <Trash2 className="size-3.5" />
                     {t("admin_delete")}
                   </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPictureing(account)}
+                  >
+                    <Camera className="size-3.5" />
+                    {t("admin_setProfilePicture")}
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}
@@ -247,7 +345,9 @@ function AdminPage() {
       {accounts && accounts.length === 0 ? (
         <div className="rounded-lg border border-border bg-card p-6 text-center">
           <p className="text-sm text-muted-foreground">{t("admin_noUsers")}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{t("admin_createFirst")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("admin_createFirst")}
+          </p>
         </div>
       ) : null}
 
@@ -300,8 +400,24 @@ function AdminPage() {
                   />
                 </div>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="create-profilePicture">
+                  Profile picture URL
+                </Label>
+                <Input
+                  id="create-profilePicture"
+                  name="profilePicture"
+                  type="url"
+                  placeholder="https://..."
+                  className="font-mono"
+                />
+              </div>
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setCreating(false)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setCreating(false)}
+                >
                   {t("admin_cancel")}
                 </Button>
                 <Button type="submit">{t("admin_save")}</Button>
@@ -348,8 +464,25 @@ function AdminPage() {
                   />
                 </div>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-profilePicture">
+                  Profile picture URL
+                </Label>
+                <Input
+                  id="edit-profilePicture"
+                  name="profilePicture"
+                  type="url"
+                  defaultValue={editing.profilePicture ?? ""}
+                  placeholder="https://..."
+                  className="font-mono"
+                />
+              </div>
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setEditing(null)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditing(null)}
+                >
                   {t("admin_cancel")}
                 </Button>
                 <Button type="submit">{t("admin_save")}</Button>
@@ -364,7 +497,9 @@ function AdminPage() {
           <DialogContent className="max-w-sm">
             <DialogHeader>
               <DialogTitle>{t("admin_resetPasswordTitle")}</DialogTitle>
-              <DialogDescription>{t("admin_resetPasswordDescription")}</DialogDescription>
+              <DialogDescription>
+                {t("admin_resetPasswordDescription")}
+              </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleReset} className="space-y-4">
               <div className="space-y-2">
@@ -379,7 +514,11 @@ function AdminPage() {
                 />
               </div>
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setResetting(null)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setResetting(null)}
+                >
                   {t("admin_cancel")}
                 </Button>
                 <Button type="submit">{t("admin_save")}</Button>
@@ -394,10 +533,16 @@ function AdminPage() {
           <DialogContent className="max-w-sm">
             <DialogHeader>
               <DialogTitle>{t("admin_confirmDelete")}</DialogTitle>
-              <DialogDescription>{displayEmail(deleting)}</DialogDescription>
+              <DialogDescription>
+                {displayEmail(deleting)}
+              </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setDeleting(null)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDeleting(null)}
+              >
                 {t("admin_cancel")}
               </Button>
               <Button
@@ -411,6 +556,38 @@ function AdminPage() {
           </DialogContent>
         </Dialog>
       ) : null}
+
+      <AlertDialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("admin_clearAllDataTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("admin_clearAllDataDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={clearingAll}>{t("admin_cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleClearAllData}
+              disabled={clearingAll}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {clearingAll ? t("misc_loading") : t("admin_clearAllDataConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <UploadProfilePictureDialog
+        open={pictureing !== null}
+        onOpenChange={() => setPictureing(null)}
+        account={pictureing}
+        currentPicture={pictureing?.profilePicture}
+        onSuccess={() => {
+          setPictureing(null);
+          void refresh();
+        }}
+      />
 
       {accounts ? (
         <p className="text-xs text-muted-foreground">

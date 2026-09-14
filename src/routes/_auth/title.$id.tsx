@@ -1,11 +1,16 @@
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { queryOptions, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Check, Clock, Play, Plus, Star } from "lucide-react";
+import { Check, Clock, Play, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "@/lib/i18n-hook";
 
-import { libraryQuery } from "@/lib/auth/queries";
-import { addToLibrary, removeFromLibrary } from "@/lib/library.functions";
+import { historyQuery, libraryQuery } from "@/lib/auth/queries";
+import {
+  addToLibrary,
+  removeFromLibrary,
+  removeWatchMarker,
+  formatWatchPosition,
+} from "@/lib/library.functions";
 import { getTitle } from "@/lib/streaming.functions";
 
 const titleQuery = (id: string) =>
@@ -19,6 +24,7 @@ export const Route = createFileRoute("/_auth/title/$id")({
     const [title] = await Promise.all([
       context.queryClient.ensureQueryData(titleQuery(params.id)),
       context.queryClient.ensureQueryData(libraryQuery),
+      context.queryClient.ensureQueryData(historyQuery),
     ]);
     if (!title) throw notFound();
     return { name: title.name, plot: title.plot };
@@ -50,6 +56,7 @@ function TitlePage() {
   const queryClient = useQueryClient();
   const { data } = useSuspenseQuery(titleQuery(id));
   const { data: library } = useSuspenseQuery(libraryQuery);
+  const { data: history } = useSuspenseQuery(historyQuery);
   const { t } = useTranslation();
   const [season, setSeason] = useState(1);
   const [busy, setBusy] = useState(false);
@@ -58,6 +65,9 @@ function TitlePage() {
 
   const title = data;
   const saved = library?.some((item) => item.slug === title.slug) ?? false;
+
+  // Entries in the watch history for this title (any season/episode).
+  const myHistory = history?.filter((h) => h.slug === title.slug) ?? [];
 
   async function toggleSave() {
     setBusy(true);
@@ -72,6 +82,25 @@ function TitlePage() {
         return;
       }
       void queryClient.invalidateQueries({ queryKey: libraryQuery.queryKey });
+    } catch (e) {
+      setBusy(false);
+      setError(String(e));
+    }
+  }
+
+  async function removeProgress(season: number, episode: number) {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await removeWatchMarker({
+        data: { slug: title.slug, season, episode },
+      });
+      setBusy(false);
+      if (!result.ok) {
+        setError("Could not clear playback progress");
+        return;
+      }
+      void queryClient.invalidateQueries({ queryKey: historyQuery.queryKey });
     } catch (e) {
       setBusy(false);
       setError(String(e));
@@ -99,7 +128,7 @@ function TitlePage() {
             <h1 className="font-display text-4xl font-semibold text-foreground">{data.name}</h1>
             <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
               <span className="flex items-center gap-1 text-primary">
-                <Star className="size-4 fill-current" />
+                <span className="size-4 fill-current" />
                 {data.score.toFixed(1)}
               </span>
               <span>{data.year}</span>
@@ -136,6 +165,61 @@ function TitlePage() {
         </div>
       </section>
 
+      {/* Resume markers for this title */}
+      {myHistory.length > 0 ? (
+        <section className="rounded-xl border border-border bg-card p-4">
+          <h2 className="mb-3 font-display text-base font-semibold text-foreground">
+            {t("watch_resumeTitle")}
+          </h2>
+          <ul className="space-y-2">
+            {myHistory.map((entry) => (
+              <li
+                key={`${entry.slug}:${entry.season}:${entry.episode}`}
+                className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-card-foreground">
+                    {entry.season > 0 || entry.episode > 0
+                      ? `S${entry.season} E${entry.episode}`
+                      : entry.title.name}
+                  </p>
+                  {entry.marker > 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      {formatWatchPosition(entry.marker)} watched — {t("watch_resumeSub")}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Link
+                    to="/watch/$id"
+                    params={{ id }}
+                    search={
+                      entry.season > 0 || entry.episode > 0
+                        ? { s: entry.season, e: entry.episode }
+                        : {}
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                  >
+                    <Play className="size-3 fill-current" />
+                    {t("watch_resume")}
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => void removeProgress(entry.season, entry.episode)}
+                    disabled={busy}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-destructive/50 hover:text-destructive disabled:opacity-60"
+                    title={t("watch_removeProgress")}
+                  >
+                    <Trash2 className="size-3.5" />
+                    {t("watch_removeProgress")}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <section className="grid gap-8 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <h2 className="font-display text-lg font-semibold text-foreground">Synopsis</h2>
@@ -154,7 +238,9 @@ function TitlePage() {
             </div>
             <div className="flex justify-between">
               <dt className="text-muted-foreground">{t("title_cast")}</dt>
-              <dd className="text-right">{data.cast.join(", ")}</dd>
+              <dd className="text-right">
+                {data.cast.length > 0 ? data.cast.join(", ") : t("title_castUnavailable")}
+              </dd>
             </div>
           </dl>
         </div>

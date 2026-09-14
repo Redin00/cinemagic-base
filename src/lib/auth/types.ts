@@ -7,6 +7,7 @@ export interface Profile {
   id: number;
   name: string;
   color: string;
+  profilePicture?: string;
   locked: boolean;
 }
 
@@ -16,6 +17,7 @@ export interface Viewer {
   name: string;
   role: Role;
   color: string;
+  profilePicture?: string;
   /** Set by the dev auth bypass so AccountMenu and other consumers don't null-assert. */
   email?: string;
 }
@@ -27,6 +29,8 @@ export interface AccountRow extends Viewer {
   createdAt: number;
   /** May be undefined when the backend has not been updated to return it. */
   email?: string;
+  /** May be undefined when the backend has not been updated to return it. */
+  profilePicture?: string;
 }
 
 /** A saved title, stored with the summary its card renders. */
@@ -43,6 +47,8 @@ export interface WatchEntry {
   episode: number;
   title: TitleSummary;
   watchedAt: number;
+  /** Seconds watched in the most recent session, 0 when nothing has been saved yet. */
+  marker: number;
 }
 
 export type LoginResult =

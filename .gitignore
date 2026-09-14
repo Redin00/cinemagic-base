@@ -19,8 +19,10 @@ dist-ssr
 # Python
 __pycache__/
 *.py[cod]
-# Accounts, sessions, library and watch history (SQLite + WAL sidecars)
+# Accounts, sessions, library, watch history (SQLite + WAL sidecars)
 python-service/data/
+# Uploaded profile pictures (runtime, regenerated on deploy)
+python-service/uploads/
 
 # Wrangler / Cloudflare
 .wrangler/
@@ -37,9 +39,3 @@ python-service/data/
 *.njsproj
 *.sln
 *.sw?
-
-# Python
-__pycache__/
-*.py[cod]
-# Accounts, sessions, library and watch history (SQLite + WAL sidecars)
-python-service/data/

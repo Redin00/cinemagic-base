@@ -3,38 +3,41 @@ import type { BrowserType } from "@/hooks/use-browser-info";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Link2, Shield } from "lucide-react";
 
-const BROWSER_META: Record<BrowserType, { name: string; installUrl: string; storeLabel: string }> = {
-  chrome: {
-    name: "Google Chrome",
-    installUrl: "https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh",
-    storeLabel: "Chrome Web Store",
-  },
-  edge: {
-    name: "Microsoft Edge",
-    installUrl: "https://microsoftedge.microsoft.com/addons/detail/ublock-origin-lite/cimighlppcgcoapaliogpjjdehbnofhn",
-    storeLabel: "Edge Add-ons",
-  },
-  opera: {
-    name: "Opera",
-    installUrl: "https://addons.opera.com/en/extensions/details/ublock/",
-    storeLabel: "Opera Add-ons",
-  },
-  firefox: {
-    name: "Mozilla Firefox",
-    installUrl: "https://addons.mozilla.org/firefox/addon/ublock-origin/",
-    storeLabel: "Firefox Add-ons",
-  },
-  safari: {
-    name: "Safari",
-    installUrl: "https://apps.apple.com/app/ublock-origin/id1482872396",
-    storeLabel: "Mac App Store",
-  },
-  other: {
-    name: "your browser",
-    installUrl: "https://github.com/gorhill/uBlock",
-    storeLabel: "uBlock Origin releases",
-  },
-};
+const BROWSER_META: Record<BrowserType, { name: string; installUrl: string; storeLabel: string }> =
+  {
+    chrome: {
+      name: "Google Chrome",
+      installUrl:
+        "https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh",
+      storeLabel: "Chrome Web Store",
+    },
+    edge: {
+      name: "Microsoft Edge",
+      installUrl:
+        "https://microsoftedge.microsoft.com/addons/detail/ublock-origin-lite/cimighlppcgcoapaliogpjjdehbnofhn",
+      storeLabel: "Edge Add-ons",
+    },
+    opera: {
+      name: "Opera",
+      installUrl: "https://addons.opera.com/en/extensions/details/ublock/",
+      storeLabel: "Opera Add-ons",
+    },
+    firefox: {
+      name: "Mozilla Firefox",
+      installUrl: "https://addons.mozilla.org/firefox/addon/ublock-origin/",
+      storeLabel: "Firefox Add-ons",
+    },
+    safari: {
+      name: "Safari",
+      installUrl: "https://apps.apple.com/app/ublock-origin/id1482872396",
+      storeLabel: "Mac App Store",
+    },
+    other: {
+      name: "your browser",
+      installUrl: "https://github.com/gorhill/uBlock",
+      storeLabel: "uBlock Origin releases",
+    },
+  };
 
 export function useAdBlockPrompt(info: { browser: BrowserType; adblockActive: boolean }) {
   return { info, shouldShow: !info.adblockActive };
