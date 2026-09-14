@@ -238,13 +238,15 @@ function WatchPage() {
     }
   }
 
+  function flushMarker() {
+    const seconds = latestSecondsRef.current;
+    if (seconds === null || !title) return;
+    persistMarker(seconds, true);
+  }
+
   useEffect(() => {
     if (!resumeEmbedUrl || !markerLoaded) return;
 
-    const flushMarker = () => {
-      const seconds = latestSecondsRef.current;
-      if (seconds !== null) persistMarker(seconds, true);
-    };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") flushMarker();
     };
@@ -265,6 +267,9 @@ function WatchPage() {
       if (event.origin !== embedOrigin) return;
       const payload = event.data as {
         type?: unknown;
+        event?: unknown;
+        currentTime?: unknown;
+        duration?: unknown;
         data?: {
           event?: unknown;
           currentTime?: unknown;
@@ -272,21 +277,21 @@ function WatchPage() {
           duration?: unknown;
         };
       };
-      const playerEvent = payload?.data?.event;
+      const playerEvent = payload?.data?.event ?? payload?.event;
       if (
         payload?.type !== "PLAYER_EVENT" ||
         !["timeupdate", "pause", "seeked", "ended"].includes(String(playerEvent))
       ) {
         return;
       }
-      const rawSeconds = payload.data.currentTime ?? payload.data.time;
+      const rawSeconds = payload.currentTime ?? payload.data?.currentTime ?? payload.data?.time;
       const seconds =
         typeof rawSeconds === "number"
           ? rawSeconds
           : typeof rawSeconds === "string"
             ? Number(rawSeconds)
             : Number.NaN;
-      const rawDuration = payload.data.duration;
+      const rawDuration = payload.duration ?? payload.data?.duration;
       const duration =
         typeof rawDuration === "number"
           ? rawDuration
@@ -294,7 +299,9 @@ function WatchPage() {
             ? Number(rawDuration)
             : Number.NaN;
       if (Number.isFinite(seconds) && seconds >= 0) {
-        persistMarker(seconds, playerEvent !== "timeupdate");
+        // Vixsrc owns the iframe lifecycle, so a debounced write can be lost
+        // when the user leaves the route before the timeout fires.
+        persistMarker(seconds, true);
       } else if (playerEvent === "ended" && Number.isFinite(duration) && duration > 0) {
         persistMarker(duration, true);
       }

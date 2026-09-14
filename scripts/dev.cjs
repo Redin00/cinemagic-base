@@ -6,6 +6,7 @@
  *   npm run dev
  *
  * Environment:
+ *   Loads .env from the repository root when present. Shell variables win.
  *   SC_PORT          - local port for the Python service (default: 8000)
  *   SC_DOMAIN        - upstream catalogue domain (default lives in python-service/main.py)
  *   SC_VIXSRC_DOMAIN - playback embed host (default lives in python-service/main.py)
@@ -19,6 +20,24 @@ const path = require("path");
 const ROOT = path.resolve(__dirname, "..");
 const PY_DIR = path.join(ROOT, "python-service");
 const VENV_DIR = path.join(PY_DIR, ".venv");
+
+function loadRootEnv() {
+  const envPath = path.join(ROOT, ".env");
+  if (!fs.existsSync(envPath)) return;
+
+  for (const rawLine of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!match) continue;
+    const [, key, rawValue] = match;
+    if (process.env[key] !== undefined) continue;
+    const value = rawValue.trim().replace(/^("|')(.*)\1$/, "$2");
+    process.env[key] = value;
+  }
+}
+
+loadRootEnv();
 
 const SC_PORT = parseInt(process.env["SC_PORT"] || "8000", 10);
 const STREAMING_API_URL = `http://localhost:${SC_PORT}`;

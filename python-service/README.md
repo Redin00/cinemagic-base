@@ -27,6 +27,9 @@ Set the environment variable `STREAMING_API_URL` for the web app to the service
 URL (e.g. `http://localhost:8000`). Without it the app keeps showing its sample
 catalogue.
 
+For local development, configure the service from the repository-root `.env`
+file. Copy `../.env.example` to `../.env`; `npm run dev` loads it automatically.
+
 ## Endpoints
 
 | Endpoint          | Returns                                     | Source                         |

@@ -16,6 +16,10 @@ npm i
 npm run dev
 ```
 
+Copy `.env.example` to `.env` in the repository root and adjust the values for
+your setup. `npm run dev` loads that file for both the Python service and Vite;
+variables already exported in the shell take precedence.
+
 `npm run dev` starts both the Python streaming API service and the Vite dev
 server, and connects them automatically via `STREAMING_API_URL`. You can still
 run the Python service manually — see
@@ -37,8 +41,7 @@ run the Python service manually — see
 | `SC_LOCKOUT_MINUTES` | `15`                               | Lockout after five failed sign-ins             |
 
 Defaults for `SC_DOMAIN` and `SC_VIXSRC_DOMAIN` live in `python-service/main.py`.
-`npm run dev` forwards overrides but never sets its own, so editing the service
-config is enough.
+The root `.env.example` documents all service configuration variables.
 
 ## Accounts
 
