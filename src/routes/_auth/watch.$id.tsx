@@ -118,6 +118,55 @@ function WatchPage() {
   const playLoggedRef = useRef(false);
   const latestSecondsRef = useRef<number | null>(null);
 
+  const wallClockRef = useRef<{ start: number; position: number; running: boolean } | null>(null);
+  const wallClockTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startWallClock = (position: number) => {
+    const safePos = Math.max(0, position);
+    wallClockRef.current = { start: Date.now(), position: safePos, running: true };
+    latestSecondsRef.current = safePos;
+
+    if (wallClockTimerRef.current) clearInterval(wallClockTimerRef.current);
+    wallClockTimerRef.current = setInterval(() => {
+      if (!wallClockRef.current || !wallClockRef.current.running) return;
+      const elapsed = (Date.now() - wallClockRef.current.start) / 1000;
+      const current = wallClockRef.current.position + elapsed;
+      latestSecondsRef.current = current;
+      persistMarker(current, false);
+    }, 5000);
+  };
+
+  const pauseWallClock = () => {
+    if (!wallClockRef.current?.running) return;
+    const elapsed = (Date.now() - wallClockRef.current.start) / 1000;
+    const current = wallClockRef.current.position + elapsed;
+    wallClockRef.current = {
+      start: Date.now(),
+      position: current,
+      running: false,
+    };
+    latestSecondsRef.current = current;
+    if (wallClockTimerRef.current) {
+      clearInterval(wallClockTimerRef.current);
+      wallClockTimerRef.current = null;
+    }
+    persistMarker(current, true);
+  };
+
+  const stopWallClock = () => {
+    if (wallClockRef.current?.running) {
+      const elapsed = (Date.now() - wallClockRef.current.start) / 1000;
+      const current = wallClockRef.current.position + elapsed;
+      latestSecondsRef.current = current;
+      persistMarker(current, true);
+    }
+    wallClockRef.current = null;
+    if (wallClockTimerRef.current) {
+      clearInterval(wallClockTimerRef.current);
+      wallClockTimerRef.current = null;
+    }
+  };
+
   const slug = title?.slug ?? "";
   const season = activeSeason?.number ?? 0;
   const episode = activeEpisode?.number ?? 0;
@@ -169,6 +218,18 @@ function WatchPage() {
   // True when the embed iframe is the active player on screen.
   const isIframeActive = !!(embedUrl && (!playlistUrl || hlsFailed) && !streamQuery.isLoading);
 
+  // When iframe embed is active, start clock-based tracking seeded from saved marker
+  useEffect(() => {
+    if (!isIframeActive || !markerLoaded) return;
+
+    startWallClock(marker ?? 0);
+
+    return () => {
+      stopWallClock();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isIframeActive, markerLoaded, marker, slug, season, episode]);
+
   // Record a play row the moment playback has a resolvable source, so the
   // title shows up in "recently watched" and resume can find a marker row
   // even if the user stops before the debounced marker write fires.
@@ -196,7 +257,11 @@ function WatchPage() {
   // stored under the same context that produced it.
   useEffect(() => {
     return () => {
-      const seconds = latestSecondsRef.current;
+      const seconds =
+        latestSecondsRef.current ??
+        (wallClockRef.current?.running
+          ? wallClockRef.current.position + (Date.now() - wallClockRef.current.start) / 1000
+          : null);
       if (seconds !== null) {
         if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
         saveDebounceRef.current = null;
@@ -242,7 +307,11 @@ function WatchPage() {
   }
 
   function flushMarker() {
-    const seconds = latestSecondsRef.current;
+    const seconds =
+      latestSecondsRef.current ??
+      (wallClockRef.current?.running
+        ? wallClockRef.current.position + (Date.now() - wallClockRef.current.start) / 1000
+        : null);
     if (seconds === null || !title) return;
     persistMarker(seconds, true);
   }
@@ -250,44 +319,44 @@ function WatchPage() {
   useEffect(() => {
     if (!markerLoaded) return;
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") flushMarker();
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("pagehide", flushMarker);
     return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("pagehide", flushMarker);
     };
   }, [markerLoaded, slug, title, season, episode]);
 
+  // Listen for player events (play, pause, seek, ended, timeupdate) to sync wall-clock
   useEffect(() => {
     if (!markerLoaded) return;
-
-    // timeupdate fires frequently — throttle server saves to avoid hammering the API.
-    let lastSaveTime = 0;
-    const SAVE_THROTTLE_MS = 5_000;
 
     const handlePlayerMessage = (event: MessageEvent) => {
       let data = event.data;
 
-      // Handle string messages (e.g. JSON strings or PlayerJS "time:X" / "ended")
+      // Handle string messages
       if (typeof data === "string") {
-        const trimmed = data.trim();
-        if (trimmed === "ended") {
-          flushMarker();
+        const trimmed = data.trim().toLowerCase();
+        if (trimmed === "play" || trimmed === "playing" || trimmed === "start") {
+          if (wallClockRef.current) {
+            startWallClock(wallClockRef.current.position);
+          }
+          return;
+        }
+        if (trimmed === "pause") {
+          pauseWallClock();
+          return;
+        }
+        if (trimmed === "seek" || trimmed === "seeking" || trimmed === "seeked") {
+          pauseWallClock();
+          return;
+        }
+        if (trimmed === "ended" || trimmed === "finish" || trimmed === "complete") {
+          stopWallClock();
           return;
         }
         if (trimmed.startsWith("time:")) {
           const parsed = parseFloat(trimmed.slice(5));
           if (Number.isFinite(parsed) && parsed >= 0) {
-            latestSecondsRef.current = parsed;
-            const now = Date.now();
-            if (now - lastSaveTime >= SAVE_THROTTLE_MS) {
-              lastSaveTime = now;
-              persistMarker(parsed, true);
-            }
+            startWallClock(parsed);
           }
           return;
         }
@@ -302,14 +371,25 @@ function WatchPage() {
         }
       }
 
-      // Handle object messages containing event/time information
+      // Handle object messages
       if (!data || typeof data !== "object") return;
       const record = data as Record<string, unknown>;
 
-      const eventName =
+      const rawEvent =
         (record.event as string | undefined) ??
         (record.type as string | undefined) ??
         ((record.data as Record<string, unknown> | undefined)?.event as string | undefined);
+      const eventName = String(rawEvent ?? "").toLowerCase();
+
+      if (eventName.includes("play") || eventName.includes("start")) {
+        if (wallClockRef.current) startWallClock(wallClockRef.current.position);
+      } else if (eventName.includes("pause")) {
+        pauseWallClock();
+      } else if (eventName.includes("seek")) {
+        pauseWallClock();
+      } else if (eventName.includes("ended") || eventName.includes("finish")) {
+        stopWallClock();
+      }
 
       const info = (record.info ?? record.data ?? record.payload ?? record) as Record<string, unknown>;
       const rawSeconds =
@@ -330,28 +410,8 @@ function WatchPage() {
             ? Number(rawSeconds)
             : Number.NaN;
 
-      const rawDuration = info.duration ?? record.duration;
-      const duration =
-        typeof rawDuration === "number"
-          ? rawDuration
-          : typeof rawDuration === "string"
-            ? Number(rawDuration)
-            : Number.NaN;
-
       if (Number.isFinite(seconds) && seconds >= 0) {
-        latestSecondsRef.current = seconds;
-
-        const now = Date.now();
-        if (now - lastSaveTime >= SAVE_THROTTLE_MS) {
-          lastSaveTime = now;
-          persistMarker(seconds, true);
-        }
-      } else if (
-        (eventName === "ended" || eventName === "finish") &&
-        Number.isFinite(duration) &&
-        duration > 0
-      ) {
-        persistMarker(duration, true);
+        startWallClock(seconds);
       }
     };
 
