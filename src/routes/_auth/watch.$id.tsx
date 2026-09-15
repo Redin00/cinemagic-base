@@ -117,7 +117,6 @@ function WatchPage() {
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playLoggedRef = useRef(false);
   const latestSecondsRef = useRef<number | null>(null);
-  const embedFrameRef = useRef<HTMLIFrameElement>(null);
 
   const slug = title?.slug ?? "";
   const season = activeSeason?.number ?? 0;
@@ -166,6 +165,9 @@ function WatchPage() {
       cancelled = true;
     };
   }, [title, slug, season, episode]);
+
+  // True when the embed iframe is the active player on screen.
+  const isIframeActive = !!(embedUrl && (!playlistUrl || hlsFailed) && !streamQuery.isLoading);
 
   // Record a play row the moment playback has a resolvable source, so the
   // title shows up in "recently watched" and resume can find a marker row
@@ -246,7 +248,7 @@ function WatchPage() {
   }
 
   useEffect(() => {
-    if (!resumeEmbedUrl || !markerLoaded) return;
+    if (!markerLoaded) return;
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") flushMarker();
@@ -258,67 +260,84 @@ function WatchPage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("pagehide", flushMarker);
     };
-  }, [resumeEmbedUrl, markerLoaded, slug, title, season, episode]);
+  }, [markerLoaded, slug, title, season, episode]);
 
   useEffect(() => {
-    if (!resumeEmbedUrl || !markerLoaded) return;
+    if (!isIframeActive || !markerLoaded) return;
+
+    // timeupdate fires frequently — throttle server saves to avoid hammering the API.
+    let lastSaveTime = 0;
+    const SAVE_THROTTLE_MS = 5_000;
 
     const handlePlayerMessage = (event: MessageEvent) => {
-      const frameWindow = embedFrameRef.current?.contentWindow;
-      if (!frameWindow || event.source !== frameWindow) return;
-
-      let payload = event.data as {
-        type?: unknown;
-        event?: unknown;
-        currentTime?: unknown;
-        duration?: unknown;
-        data?: {
-          event?: unknown;
-          currentTime?: unknown;
-          time?: unknown;
-          duration?: unknown;
-        };
-      };
-      if (typeof event.data === "string") {
+      // Validate origin against the configured player domain if present (including subdomains).
+      if (player.domain) {
+        const allowedHost = player.domain
+          .replace(/^https?:\/\//, "")
+          .replace(/\/+$/, "")
+          .split("/")[0];
         try {
-          payload = JSON.parse(event.data) as typeof payload;
+          const originHost = new URL(event.origin).hostname;
+          if (originHost !== allowedHost && !originHost.endsWith("." + allowedHost)) {
+            return;
+          }
         } catch {
           return;
         }
       }
-      const playerEvent = payload?.data?.event ?? payload?.event;
-      if (
-        payload?.type !== "PLAYER_EVENT" ||
-        !["timeupdate", "pause", "seeked", "ended"].includes(String(playerEvent))
-      ) {
+
+      // Handle plain string events (e.g. "ended")
+      if (typeof event.data === "string") {
+        const evt = event.data.trim();
+        if (evt === "ended") {
+          flushMarker();
+        }
         return;
       }
-      const rawSeconds = payload.currentTime ?? payload.data?.currentTime ?? payload.data?.time;
+
+      // Handle object messages containing event/time information
+      const data = event.data as Record<string, unknown> | null;
+      if (!data || typeof data !== "object") return;
+
+      const eventName =
+        (data.event as string | undefined) ??
+        ((data.data as Record<string, unknown> | undefined)?.event as string | undefined) ??
+        (data.type === "PLAYER_EVENT"
+          ? ((data.data as Record<string, unknown> | undefined)?.event as string | undefined)
+          : undefined);
+
+      const info = (data.info ?? data.data ?? data) as Record<string, unknown>;
+      const rawSeconds = info.currentTime ?? info.time;
       const seconds =
         typeof rawSeconds === "number"
           ? rawSeconds
           : typeof rawSeconds === "string"
             ? Number(rawSeconds)
             : Number.NaN;
-      const rawDuration = payload.duration ?? payload.data?.duration;
+      const rawDuration = info.duration;
       const duration =
         typeof rawDuration === "number"
           ? rawDuration
           : typeof rawDuration === "string"
             ? Number(rawDuration)
             : Number.NaN;
+
       if (Number.isFinite(seconds) && seconds >= 0) {
-        // Vixsrc owns the iframe lifecycle, so a debounced write can be lost
-        // when the user leaves the route before the timeout fires.
-        persistMarker(seconds, true);
-      } else if (playerEvent === "ended" && Number.isFinite(duration) && duration > 0) {
+        latestSecondsRef.current = seconds;
+
+        const now = Date.now();
+        if (now - lastSaveTime >= SAVE_THROTTLE_MS) {
+          lastSaveTime = now;
+          persistMarker(seconds, true);
+        }
+      } else if (eventName === "ended" && Number.isFinite(duration) && duration > 0) {
         persistMarker(duration, true);
       }
     };
 
     window.addEventListener("message", handlePlayerMessage);
     return () => window.removeEventListener("message", handlePlayerMessage);
-  }, [resumeEmbedUrl, markerLoaded, slug, title, season, episode]);
+  }, [isIframeActive, markerLoaded, slug, title, season, episode, player.domain]);
 
   if (!title) return null;
 
@@ -355,7 +374,7 @@ function WatchPage() {
             initialSeconds={marker ?? undefined}
           />
         </div>
-      ) : streamQuery.isLoading ? (
+      ) : streamQuery.isLoading || !markerLoaded ? (
         <div className="flex aspect-video w-full items-center justify-center rounded-xl border border-border bg-black">
           <Loader2 className="size-6 animate-spin text-muted-foreground" />
         </div>
@@ -367,7 +386,6 @@ function WatchPage() {
           {adBlockPrompt.shouldShow ? <AdBlockPrompt browser={adBlockPrompt.info.browser} /> : null}
           <div className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-black">
             <iframe
-              ref={embedFrameRef}
               src={resumeEmbedUrl ?? embedUrl}
               title={`${title.name} player`}
               className="size-full"

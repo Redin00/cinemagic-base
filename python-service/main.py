@@ -76,7 +76,7 @@ log = logging.getLogger("streaming-dashboard")
 # --------------------------------------------------------------------------- #
 
 # The site changes domain often; set the current one here or via env var.
-SC_DOMAIN = os.environ.get("SC_DOMAIN", "streamingcommunityz.taxi")
+SC_DOMAIN = os.environ.get("SC_DOMAIN", "streamingcommunityz.academy")
 IMAGE_CDN = os.environ.get("SC_IMAGE_CDN", f"https://cdn.{SC_DOMAIN}/images")
 CACHE_TTL = int(os.environ.get("SC_CACHE_TTL", "600"))  # seconds
 CORS_ORIGINS = os.environ.get("SC_CORS_ORIGINS", "*").split(",")
