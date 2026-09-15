@@ -70,6 +70,11 @@ CREATE TABLE IF NOT EXISTS watch_history (
     PRIMARY KEY (account_id, slug, season, episode)
 );
 CREATE INDEX IF NOT EXISTS history_account ON watch_history(account_id, watched_at DESC);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -113,6 +118,23 @@ def init_db() -> None:
         except sqlite3.OperationalError:
             pass  # column already present
     log.info("database ready at %s", DB_PATH)
+
+
+def get_setting(key: str, default: str = "") -> str:
+    with connect() as conn:
+        row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+    return str(row["value"]) if row is not None else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
 
 
 def _number(value: Any) -> Optional[float]:

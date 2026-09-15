@@ -1,4 +1,5 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
@@ -15,6 +16,7 @@ export const Route = createFileRoute("/register")({
 
 function RegisterPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +35,8 @@ function RegisterPage() {
         setError(result.message);
         return;
       }
+      void queryClient.invalidateQueries({ queryKey: ["profiles"] });
+      void queryClient.invalidateQueries({ queryKey: ["accounts"] });
       router.history.push("/login");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("misc_error"));

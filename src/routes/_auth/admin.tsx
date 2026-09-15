@@ -1,6 +1,6 @@
 import { queryOptions, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { KeyRound, LockOpen, Pencil, Trash2, UserPlus, Camera, Loader2 } from "lucide-react";
+import { KeyRound, LockOpen, Pencil, Trash2, UserPlus, Camera, Loader2, Globe } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useTranslation } from "@/lib/i18n-hook";
 
@@ -43,15 +43,22 @@ import {
   resetPassword,
   updateAccount,
 } from "@/lib/auth.functions";
-import {
-  clearAllHistory,
-  clearAllLibrary,
-} from "@/lib/library.functions";
+import { clearAllHistory, clearAllLibrary } from "@/lib/library.functions";
 import type { AccountRow, Role } from "@/lib/auth/types";
+import {
+  getDomainSettings,
+  updateDomainSettings,
+  type DomainSettings,
+} from "@/lib/settings.functions";
 
 const accountsQuery = queryOptions({
   queryKey: ["accounts"],
   queryFn: () => listAccounts(),
+});
+
+const domainSettingsQuery = queryOptions({
+  queryKey: ["domain-settings"],
+  queryFn: () => getDomainSettings(),
 });
 
 export const Route = createFileRoute("/_auth/admin")({
@@ -61,7 +68,11 @@ export const Route = createFileRoute("/_auth/admin")({
   beforeLoad: ({ context }) => {
     if (context.viewer.role !== "admin") throw redirect({ to: "/" });
   },
-  loader: ({ context }) => context.queryClient.ensureQueryData(accountsQuery),
+  loader: ({ context }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData(accountsQuery),
+      context.queryClient.ensureQueryData(domainSettingsQuery),
+    ]),
   component: AdminPage,
 });
 
@@ -75,6 +86,7 @@ function AdminPage() {
   const { viewer } = Route.useRouteContext();
   const queryClient = useQueryClient();
   const { data: accounts } = useSuspenseQuery(accountsQuery);
+  const { data: domainSettings } = useSuspenseQuery(domainSettingsQuery);
   const { t } = useTranslation();
 
   const [creating, setCreating] = useState(false);
@@ -86,8 +98,23 @@ function AdminPage() {
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  async function handleDomainSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const scDomain = (form.elements.namedItem("scDomain") as HTMLInputElement).value;
+    const vixsrcDomain = (form.elements.namedItem("vixsrcDomain") as HTMLInputElement).value;
+    const result = await updateDomainSettings({ data: { scDomain, vixsrcDomain } });
+    if (!result.ok) {
+      setError(result.message ?? t("misc_error"));
+      return;
+    }
+    await queryClient.invalidateQueries({ queryKey: domainSettingsQuery.queryKey });
+    setError(t("admin_domainsSaved"));
+  }
+
   function refresh() {
     void queryClient.invalidateQueries({ queryKey: accountsQuery.queryKey });
+    void queryClient.invalidateQueries({ queryKey: ["profiles"] });
   }
 
   async function act(run: () => Promise<{ ok: boolean; message?: string }>) {
@@ -178,10 +205,7 @@ function AdminPage() {
     const libraryResult = await clearAllLibrary();
     if (!historyResult.ok || !libraryResult.ok) {
       setError(
-        historyResult.ok
-          ? libraryResult.message
-          : historyResult.message ??
-          t("misc_error"),
+        historyResult.ok ? libraryResult.message : (historyResult.message ?? t("misc_error")),
       );
       setClearingAll(false);
       return;
@@ -216,9 +240,7 @@ function AdminPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-3xl font-semibold text-foreground">
-          {t("admin_title")}
-        </h1>
+        <h1 className="font-display text-3xl font-semibold text-foreground">{t("admin_title")}</h1>
         <div className="flex gap-2">
           <Button
             type="button"
@@ -235,12 +257,7 @@ function AdminPage() {
             )}
             {t("admin_clearAllData")}
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => setCreating(true)}
-            className="gap-2"
-          >
+          <Button type="button" size="sm" onClick={() => setCreating(true)} className="gap-2">
             <UserPlus className="size-4" />
             {t("admin_addUser")}
           </Button>
@@ -252,6 +269,46 @@ function AdminPage() {
           {error}
         </div>
       ) : null}
+
+      <div className="rounded-lg border border-border bg-card p-5">
+        <div className="mb-4 flex items-start gap-3">
+          <Globe className="mt-1 size-5 text-muted-foreground" />
+          <div>
+            <h2 className="font-display text-lg font-semibold">{t("admin_domainsTitle")}</h2>
+            <p className="text-sm text-muted-foreground">{t("admin_domainsDescription")}</p>
+          </div>
+        </div>
+        <form onSubmit={handleDomainSettings} className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="admin-scDomain">{t("admin_catalogueDomain")}</Label>
+            <Input
+              id="admin-scDomain"
+              name="scDomain"
+              defaultValue={(domainSettings as DomainSettings).scDomain}
+              placeholder="streamingcommunity.example"
+              className="font-mono"
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="admin-vixsrcDomain">{t("admin_playbackDomain")}</Label>
+            <Input
+              id="admin-vixsrcDomain"
+              name="vixsrcDomain"
+              defaultValue={(domainSettings as DomainSettings).vixsrcDomain}
+              placeholder="vixsrc.example"
+              className="font-mono"
+              required
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <Button type="submit" className="gap-2">
+              <Globe className="size-4" />
+              {t("admin_domainsSave")}
+            </Button>
+          </div>
+        </form>
+      </div>
 
       <div className="rounded-lg border border-border">
         <Table>
@@ -275,25 +332,19 @@ function AdminPage() {
                           className="aspect-square h-full w-full rounded-full object-cover"
                         />
                       ) : (
-                        <AvatarFallback
-                          style={{ backgroundColor: account.color }}
-                        >
+                        <AvatarFallback style={{ backgroundColor: account.color }}>
                           {account.name.slice(0, 1).toUpperCase()}
                         </AvatarFallback>
                       )}
                     </Avatar>
                     <div>
                       <div className="text-sm font-medium">{account.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {displayEmail(account)}
-                      </div>
+                      <div className="text-xs text-muted-foreground">{displayEmail(account)}</div>
                     </div>
                   </div>
                 </TableCell>
                 <TableCell>
-                  <Badge
-                    variant={account.role === "admin" ? "default" : "secondary"}
-                  >
+                  <Badge variant={account.role === "admin" ? "default" : "secondary"}>
                     {account.role === "admin" ? t("admin_admin") : t("admin_viewer")}
                   </Badge>
                 </TableCell>
@@ -345,9 +396,7 @@ function AdminPage() {
       {accounts && accounts.length === 0 ? (
         <div className="rounded-lg border border-border bg-card p-6 text-center">
           <p className="text-sm text-muted-foreground">{t("admin_noUsers")}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {t("admin_createFirst")}
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("admin_createFirst")}</p>
         </div>
       ) : null}
 
@@ -401,9 +450,7 @@ function AdminPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="create-profilePicture">
-                  Profile picture URL
-                </Label>
+                <Label htmlFor="create-profilePicture">Profile picture URL</Label>
                 <Input
                   id="create-profilePicture"
                   name="profilePicture"
@@ -413,11 +460,7 @@ function AdminPage() {
                 />
               </div>
               <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setCreating(false)}
-                >
+                <Button type="button" variant="outline" onClick={() => setCreating(false)}>
                   {t("admin_cancel")}
                 </Button>
                 <Button type="submit">{t("admin_save")}</Button>
@@ -465,9 +508,7 @@ function AdminPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-profilePicture">
-                  Profile picture URL
-                </Label>
+                <Label htmlFor="edit-profilePicture">Profile picture URL</Label>
                 <Input
                   id="edit-profilePicture"
                   name="profilePicture"
@@ -478,11 +519,7 @@ function AdminPage() {
                 />
               </div>
               <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setEditing(null)}
-                >
+                <Button type="button" variant="outline" onClick={() => setEditing(null)}>
                   {t("admin_cancel")}
                 </Button>
                 <Button type="submit">{t("admin_save")}</Button>
@@ -497,9 +534,7 @@ function AdminPage() {
           <DialogContent className="max-w-sm">
             <DialogHeader>
               <DialogTitle>{t("admin_resetPasswordTitle")}</DialogTitle>
-              <DialogDescription>
-                {t("admin_resetPasswordDescription")}
-              </DialogDescription>
+              <DialogDescription>{t("admin_resetPasswordDescription")}</DialogDescription>
             </DialogHeader>
             <form onSubmit={handleReset} className="space-y-4">
               <div className="space-y-2">
@@ -514,11 +549,7 @@ function AdminPage() {
                 />
               </div>
               <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setResetting(null)}
-                >
+                <Button type="button" variant="outline" onClick={() => setResetting(null)}>
                   {t("admin_cancel")}
                 </Button>
                 <Button type="submit">{t("admin_save")}</Button>
@@ -533,16 +564,10 @@ function AdminPage() {
           <DialogContent className="max-w-sm">
             <DialogHeader>
               <DialogTitle>{t("admin_confirmDelete")}</DialogTitle>
-              <DialogDescription>
-                {displayEmail(deleting)}
-              </DialogDescription>
+              <DialogDescription>{displayEmail(deleting)}</DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setDeleting(null)}
-              >
+              <Button type="button" variant="outline" onClick={() => setDeleting(null)}>
                 {t("admin_cancel")}
               </Button>
               <Button
@@ -561,9 +586,7 @@ function AdminPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("admin_clearAllDataTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("admin_clearAllDataDescription")}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{t("admin_clearAllDataDescription")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={clearingAll}>{t("admin_cancel")}</AlertDialogCancel>

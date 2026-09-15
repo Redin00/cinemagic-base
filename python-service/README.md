@@ -9,7 +9,7 @@ Small FastAPI wrapper around [`streamingcommunity-unofficialapi`](https://pypi.o
 cd python-service
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-SC_DOMAIN=<current-streamingcommunity-domain> uvicorn main:app --reload --port 8000
+uvicorn main:app --reload --port 8000
 ```
 
 Check it: `curl localhost:8000/health` then `curl "localhost:8000/search?q=dark"`.
@@ -18,7 +18,7 @@ Check it: `curl localhost:8000/health` then `curl "localhost:8000/search?q=dark"
 
 ```bash
 docker build -t streaming-api python-service
-docker run -p 8000:8000 -e SC_DOMAIN=<domain> streaming-api
+docker run -p 8000:8000 streaming-api
 ```
 
 ## Connect the dashboard
@@ -47,7 +47,8 @@ file. Copy `../.env.example` to `../.env`; `npm run dev` loads it automatically.
 
 ## Notes
 
-- The upstream site rotates its domain; if everything 502s, update `SC_DOMAIN`.
+- The upstream site rotates its domain; if everything 502s, update the catalogue
+  domain from the admin panel.
 - Listings come from the site's own page routes: asking `/it/browse/{slider}` for
   `application/json` returns the payload it would otherwise render. `trending`,
   `latest` and `top10` are the sliders, `/it/browse/genre?g=<name>` filters by
@@ -61,8 +62,7 @@ file. Copy `../.env.example` to `../.env`; `npm run dev` loads it automatically.
   library of ~100 titles instead of the real tens of thousands.
 - Playback is keyed by TMDB id and served to the dashboard via `GET /player`
   (embed host) and `GET /stream?tmdb=&type=movie|tv[&s=&e=]` (direct playlist).
-  The host comes from `SC_VIXSRC_DOMAIN` (default `vixsrc.to`) and rotates just as
-  often; set it empty to disable playback.
+  The host comes from the playback domain in the admin panel (default `vixsrc.to`).
 - `API.get_links()` is deliberately unused: it scrapes `window.masterPlaylist`
   from the host's public `/movie/{tmdb}` and `/tv/{tmdb}/{s}/{e}` pages, which no
   longer contain it. `resolve_playlist()` instead calls the host's private

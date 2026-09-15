@@ -51,14 +51,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field, field_validator
 from scuapi import API
 
-from auth import bootstrap_admin
+from auth import bootstrap_admin, require_admin
 from auth import router as auth_router
-from db import init_db
+from db import get_setting, init_db, set_setting
 from library import router as library_router
 
 # --------------------------------------------------------------------------- #
@@ -76,23 +77,21 @@ log = logging.getLogger("streaming-dashboard")
 # --------------------------------------------------------------------------- #
 
 # The site changes domain often; set the current one here or via env var.
-SC_DOMAIN = os.environ.get("SC_DOMAIN", "streamingcommunityz.academy")
-IMAGE_CDN = os.environ.get("SC_IMAGE_CDN", f"https://cdn.{SC_DOMAIN}/images")
+DEFAULT_SC_DOMAIN = "streamingcommunityz.academy"
+DEFAULT_VIXSRC_DOMAIN = "vixsrc.to"
+SC_DOMAIN = ""
+IMAGE_CDN = ""
 CACHE_TTL = int(os.environ.get("SC_CACHE_TTL", "600"))  # seconds
 CORS_ORIGINS = os.environ.get("SC_CORS_ORIGINS", "*").split(",")
 
 # Playback embed host. Rotates like SC_DOMAIN; leave empty to disable playback.
-VIXSRC_DOMAIN = os.environ.get("SC_VIXSRC_DOMAIN", "vixsrc.to")
+VIXSRC_DOMAIN = ""
 
-api = API(SC_DOMAIN)
+api = None
 
 # The playback host is scraped over two back-to-back requests, so pool them.
 vixsrc_session = requests.Session()
-vixsrc_session.headers["user-agent"] = api.user_agent
-
-# Asking the catalogue site for JSON is what makes it answer page routes with the
-# payload it would otherwise render; without it we would have to parse its HTML.
-JSON_HEADERS = {"user-agent": api.user_agent, "accept": "application/json"}
+JSON_HEADERS = {}
 
 # Where uploaded profile pictures are stored (defaults to an `uploads` folder beside this file).
 _PROFILE_PICTURES_DIR = Path(os.environ.get("SC_PROFILE_PICTURES_DIR", str(Path(__file__).parent / "uploads")))
@@ -124,6 +123,14 @@ app.mount(
 
 # Import time, so the schema and the first admin exist before the first request.
 init_db()
+SC_DOMAIN = get_setting("sc_domain", os.environ.get("SC_DOMAIN", DEFAULT_SC_DOMAIN)).strip()
+VIXSRC_DOMAIN = get_setting(
+    "vixsrc_domain", os.environ.get("SC_VIXSRC_DOMAIN", DEFAULT_VIXSRC_DOMAIN)
+).strip()
+IMAGE_CDN = os.environ.get("SC_IMAGE_CDN", f"https://cdn.{SC_DOMAIN}/images")
+api = API(SC_DOMAIN)
+vixsrc_session.headers["user-agent"] = api.user_agent
+JSON_HEADERS = {"user-agent": api.user_agent, "accept": "application/json"}
 bootstrap_admin()
 
 # --------------------------------------------------------------------------- #
@@ -131,6 +138,21 @@ bootstrap_admin()
 # --------------------------------------------------------------------------- #
 
 _cache: Dict[str, tuple[float, Any]] = {}
+
+
+def configure_domains(sc_domain: str, vixsrc_domain: str) -> None:
+    global SC_DOMAIN, VIXSRC_DOMAIN, IMAGE_CDN, api, JSON_HEADERS
+    SC_DOMAIN = sc_domain
+    VIXSRC_DOMAIN = vixsrc_domain
+    IMAGE_CDN = os.environ.get("SC_IMAGE_CDN", f"https://cdn.{SC_DOMAIN}/images")
+    api = API(SC_DOMAIN)
+    vixsrc_session.headers["user-agent"] = api.user_agent
+    JSON_HEADERS = {"user-agent": api.user_agent, "accept": "application/json"}
+    _cache.clear()
+
+
+def current_domains() -> tuple[str, str]:
+    return get_setting("sc_domain", SC_DOMAIN), get_setting("vixsrc_domain", VIXSRC_DOMAIN)
 
 
 def cached(key: str, producer):
@@ -410,16 +432,47 @@ def resolve_playlist(
 
 @app.get("/health")
 def health():
-    return {"ok": True, "domain": SC_DOMAIN}
+    domain, _ = current_domains()
+    return {"ok": True, "domain": domain}
+
+
+class DomainSettings(BaseModel):
+    scDomain: str = Field(min_length=1, max_length=253)
+    vixsrcDomain: str = Field(min_length=1, max_length=253)
+
+    @field_validator("scDomain", "vixsrcDomain")
+    @classmethod
+    def validate_domain(cls, value: str) -> str:
+        value = value.strip().removeprefix("https://").removeprefix("http://").rstrip("/")
+        if not value or "/" in value or " " in value:
+            raise ValueError("domain must be a hostname without a scheme or path")
+        return value
+
+
+@app.get("/settings/domains")
+def get_domain_settings(_: Dict[str, Any] = Depends(require_admin)):
+    sc_domain, vixsrc_domain = current_domains()
+    return {"scDomain": sc_domain, "vixsrcDomain": vixsrc_domain}
+
+
+@app.put("/settings/domains")
+def update_domain_settings(
+    body: DomainSettings, _: Dict[str, Any] = Depends(require_admin)
+):
+    set_setting("sc_domain", body.scDomain)
+    set_setting("vixsrc_domain", body.vixsrcDomain)
+    configure_domains(body.scDomain, body.vixsrcDomain)
+    return {"scDomain": body.scDomain, "vixsrcDomain": body.vixsrcDomain}
 
 
 @app.get("/player")
 def player():
     """Playback embed host, so the dashboard can build iframe URLs client-side."""
+    _, vixsrc_domain = current_domains()
     return {
         "provider": "vixsrc",
-        "domain": VIXSRC_DOMAIN,
-        "enabled": bool(VIXSRC_DOMAIN),
+        "domain": vixsrc_domain,
+        "enabled": bool(vixsrc_domain),
     }
 
 
@@ -475,7 +528,7 @@ def trending():
 @app.get("/latest")
 def latest():
     try:
-        return cached("latest", lambda: browse("latest"))
+        return cached("latest", lambda: browse("latest", limit=60))
     except Exception as exc:
         log.exception("latest failed")
         raise HTTPException(status_code=502, detail=f"upstream latest failed: {exc}")

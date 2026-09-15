@@ -41,8 +41,8 @@ export function messageFor(error: unknown): string {
 }
 
 export async function serviceFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const base = process.env["STREAMING_API_URL"];
-  if (!base) throw new ServiceError(0, "STREAMING_API_URL is not configured");
+  const port = process.env["SC_PORT"] || "8000";
+  const base = process.env["STREAMING_API_URL"] || `http://localhost:${port}`;
 
   const headers = new Headers(init?.headers);
   headers.set("accept", "application/json");

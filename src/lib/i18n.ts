@@ -190,8 +190,7 @@ export const EN = {
   watch_resumeTitle: "Resume watching",
   watch_resumeSub: "picked up where you left off",
   watch_removeProgress: "Remove progress",
-  watch_noHostConfigured:
-    "No playback host is configured. Set SC_VIXSRC_DOMAIN on the streaming service.",
+  watch_noHostConfigured: "No playback host is configured. Set it in the admin panel.",
   watch_noExternalId: "This title has no external id, so it cannot be embedded.",
   search_search: "Search",
   search_searching: "Searching…",
@@ -217,6 +216,12 @@ export const EN = {
   admin_of: "of",
   admin_usersShown: "users.",
   admin_clearedAllData: "All data cleared.",
+  admin_domainsTitle: "Streaming domains",
+  admin_domainsDescription: "Change upstream hosts without restarting the service.",
+  admin_catalogueDomain: "Catalogue domain",
+  admin_playbackDomain: "Playback domain",
+  admin_domainsSave: "Save domains",
+  admin_domainsSaved: "Domains updated successfully.",
 } as const;
 export const IT = {
   nav_browse: "Esplora",
@@ -405,8 +410,7 @@ export const IT = {
   watch_resumeTitle: "Riprendi visione",
   watch_resumeSub: "ripreso da dove avevi lasciato",
   watch_removeProgress: "Rimuovi progresso",
-  watch_noHostConfigured:
-    "Nessun host di riproduzione configurato. Imposta SC_VIXSRC_DOMAIN sul servizio di streaming.",
+  watch_noHostConfigured: "Nessun host di riproduzione configurato. Impostalo nel pannello admin.",
   watch_noExternalId: "Questo titolo non ha un id esterno, non puo' essere incorporato.",
   search_search: "Cerca",
   search_searching: "Ricerca in corso...",
@@ -429,5 +433,11 @@ export const IT = {
   admin_clearAllDataDescription:
     "Questa operazione eliminerà definitivamente la libreria e la cronologia di ogni utente. Non può essere annullata.",
   admin_clearAllDataConfirm: "Sì, cancella tutti i dati",
+  admin_domainsTitle: "Domini di streaming",
+  admin_domainsDescription: "Cambia gli host upstream senza riavviare il servizio.",
+  admin_catalogueDomain: "Dominio del catalogo",
+  admin_playbackDomain: "Dominio di riproduzione",
+  admin_domainsSave: "Salva domini",
+  admin_domainsSaved: "Domini aggiornati con successo.",
 } as const;
 export type Translations = typeof EN;

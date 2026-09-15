@@ -7,7 +7,17 @@ import { ServiceError, SESSION_COOKIE, SESSION_MAX_AGE, messageFor, serviceFetch
 
 // ---- In-memory stand-in used when the Python service is unreachable. ----
 
-const mockAccounts: AccountRow[] = [];
+const mockAccounts: AccountRow[] = [
+  {
+    id: 1,
+    name: "Admin",
+    role: "admin",
+    color: "#6366f1",
+    email: "admin@streamapp.local",
+    lockedUntil: null,
+    createdAt: Date.now(),
+  },
+];
 let nextAccountId = 2;
 const mockHistory: { slug: string; season: number; episode: number; marker?: number }[] = [];
 const mockLibrary: { slug: string }[] = [];
@@ -61,7 +71,7 @@ export const getProfiles = createServerFn({ method: "GET" }).handler(
     try {
       return await serviceFetch<Profile[]>("/auth/profiles");
     } catch {
-      return mockProfiles;
+      return [...mockProfiles];
     }
   },
 );
@@ -108,12 +118,7 @@ export const registerAccount = createServerFn({ method: "POST" })
       });
       return { ok: true, data: { ...account, locked: false } };
     } catch (error) {
-      if (error instanceof ServiceError && error.status !== 0) {
-        return { ok: false, message: messageFor(error) };
-      }
-      const profile = makeProfile({ name: data.name, color: DEFAULT_COLOR });
-      mockProfiles.push(profile);
-      return { ok: true, data: profile };
+      return { ok: false, message: messageFor(error) };
     }
   });
 
@@ -151,13 +156,8 @@ export const getViewer = createServerFn({ method: "GET" }).handler(
 );
 
 export const listAccounts = createServerFn({ method: "GET" }).handler(
-  async (): Promise<AccountRow[] | null> => {
-    try {
-      return await serviceFetch<AccountRow[]>("/accounts");
-    } catch {
-      // Not an admin, signed out, or the service is down: none of them is a list.
-      return [...mockAccounts];
-    }
+  async (): Promise<AccountRow[]> => {
+    return serviceFetch<AccountRow[]>("/accounts");
   },
 );
 
@@ -195,6 +195,13 @@ export const createAccount = createServerFn({ method: "POST" })
         ? { ...base, profilePicture: data.profilePicture }
         : base;
       mockAccounts.push(account);
+      mockProfiles.push({
+        id: account.id,
+        name: account.name,
+        color: account.color,
+        locked: false,
+        profilePicture: account.profilePicture,
+      });
       return { ok: true, data: account };
     }
   });
@@ -229,6 +236,15 @@ export const updateAccount = createServerFn({ method: "POST" })
       if (patch.color !== undefined) acc.color = patch.color;
       if (patch.profilePicture !== undefined) acc.profilePicture = patch.profilePicture;
       if (patch.unlock !== undefined && patch.unlock) acc.lockedUntil = null;
+
+      const pIdx = mockProfiles.findIndex((p) => p.id === id);
+      if (pIdx !== -1) {
+        const prof = mockProfiles[pIdx]!;
+        if (patch.name !== undefined) prof.name = patch.name;
+        if (patch.color !== undefined) prof.color = patch.color;
+        if (patch.profilePicture !== undefined) prof.profilePicture = patch.profilePicture;
+        if (patch.unlock !== undefined && patch.unlock) prof.locked = false;
+      }
       return { ok: true, data: acc };
     }
   });
@@ -416,6 +432,8 @@ export const deleteAccount = createServerFn({ method: "POST" })
       const idx = mockAccounts.findIndex((a) => a.id === data.id);
       if (idx === -1) return { ok: false, message: "Account not found" };
       mockAccounts.splice(idx, 1);
+      const pIdx = mockProfiles.findIndex((p) => p.id === data.id);
+      if (pIdx !== -1) mockProfiles.splice(pIdx, 1);
       return { ok: true, data: null };
     }
   });
