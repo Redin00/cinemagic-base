@@ -263,58 +263,74 @@ function WatchPage() {
   }, [markerLoaded, slug, title, season, episode]);
 
   useEffect(() => {
-    if (!isIframeActive || !markerLoaded) return;
+    if (!markerLoaded) return;
 
     // timeupdate fires frequently — throttle server saves to avoid hammering the API.
     let lastSaveTime = 0;
     const SAVE_THROTTLE_MS = 5_000;
 
     const handlePlayerMessage = (event: MessageEvent) => {
-      // Validate origin against the configured player domain if present (including subdomains).
-      if (player.domain) {
-        const allowedHost = player.domain
-          .replace(/^https?:\/\//, "")
-          .replace(/\/+$/, "")
-          .split("/")[0];
-        try {
-          const originHost = new URL(event.origin).hostname;
-          if (originHost !== allowedHost && !originHost.endsWith("." + allowedHost)) {
+      let data = event.data;
+
+      // Handle string messages (e.g. JSON strings or PlayerJS "time:X" / "ended")
+      if (typeof data === "string") {
+        const trimmed = data.trim();
+        if (trimmed === "ended") {
+          flushMarker();
+          return;
+        }
+        if (trimmed.startsWith("time:")) {
+          const parsed = parseFloat(trimmed.slice(5));
+          if (Number.isFinite(parsed) && parsed >= 0) {
+            latestSecondsRef.current = parsed;
+            const now = Date.now();
+            if (now - lastSaveTime >= SAVE_THROTTLE_MS) {
+              lastSaveTime = now;
+              persistMarker(parsed, true);
+            }
+          }
+          return;
+        }
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+          try {
+            data = JSON.parse(trimmed);
+          } catch {
             return;
           }
-        } catch {
+        } else {
           return;
         }
       }
 
-      // Handle plain string events (e.g. "ended")
-      if (typeof event.data === "string") {
-        const evt = event.data.trim();
-        if (evt === "ended") {
-          flushMarker();
-        }
-        return;
-      }
-
       // Handle object messages containing event/time information
-      const data = event.data as Record<string, unknown> | null;
       if (!data || typeof data !== "object") return;
+      const record = data as Record<string, unknown>;
 
       const eventName =
-        (data.event as string | undefined) ??
-        ((data.data as Record<string, unknown> | undefined)?.event as string | undefined) ??
-        (data.type === "PLAYER_EVENT"
-          ? ((data.data as Record<string, unknown> | undefined)?.event as string | undefined)
-          : undefined);
+        (record.event as string | undefined) ??
+        (record.type as string | undefined) ??
+        ((record.data as Record<string, unknown> | undefined)?.event as string | undefined);
 
-      const info = (data.info ?? data.data ?? data) as Record<string, unknown>;
-      const rawSeconds = info.currentTime ?? info.time;
+      const info = (record.info ?? record.data ?? record.payload ?? record) as Record<string, unknown>;
+      const rawSeconds =
+        info.currentTime ??
+        info.time ??
+        info.seconds ??
+        info.position ??
+        info.value ??
+        record.currentTime ??
+        record.time ??
+        record.seconds ??
+        record.value;
+
       const seconds =
         typeof rawSeconds === "number"
           ? rawSeconds
           : typeof rawSeconds === "string"
             ? Number(rawSeconds)
             : Number.NaN;
-      const rawDuration = info.duration;
+
+      const rawDuration = info.duration ?? record.duration;
       const duration =
         typeof rawDuration === "number"
           ? rawDuration
@@ -330,14 +346,18 @@ function WatchPage() {
           lastSaveTime = now;
           persistMarker(seconds, true);
         }
-      } else if (eventName === "ended" && Number.isFinite(duration) && duration > 0) {
+      } else if (
+        (eventName === "ended" || eventName === "finish") &&
+        Number.isFinite(duration) &&
+        duration > 0
+      ) {
         persistMarker(duration, true);
       }
     };
 
     window.addEventListener("message", handlePlayerMessage);
     return () => window.removeEventListener("message", handlePlayerMessage);
-  }, [isIframeActive, markerLoaded, slug, title, season, episode, player.domain]);
+  }, [markerLoaded, slug, title, season, episode]);
 
   if (!title) return null;
 
