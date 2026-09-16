@@ -29,9 +29,6 @@ function nextId(): number {
 /** Default mock profiles shown when the Python service is unreachable. */
 const mockProfiles: Profile[] = [{ id: 1, name: "Admin", color: "#6366f1", locked: false }];
 
-/** Mock password that works for mock profiles when the service is unreachable. */
-const MOCK_PASSWORD = "admin123";
-
 function makeProfile(data: { name: string; color: string; locked?: boolean }): Profile {
   return {
     id: nextId(),
@@ -92,19 +89,8 @@ export const login = createServerFn({ method: "POST" })
       setCookie(SESSION_COOKIE, result.token, { ...COOKIE, maxAge: SESSION_MAX_AGE });
       return { ok: true, viewer: result.account };
     } catch {
-      // Fall back to mock authentication when the Python service is unreachable.
-      const profile = mockProfiles.find((p) => p.id === data.accountId);
-      if (profile && data.password === MOCK_PASSWORD) {
-        const viewer: Viewer = {
-          id: profile.id,
-          name: profile.name,
-          role: "admin",
-          color: profile.color,
-        };
-        setCookie(SESSION_COOKIE, "mock-token", { ...COOKIE, maxAge: SESSION_MAX_AGE });
-        return { ok: true, viewer };
-      }
-      return loginFailure(new ServiceError(401, "Wrong password"));
+      // Never authenticate locally when the account service is unavailable.
+      return loginFailure(new ServiceError(503, "Authentication service unavailable"));
     }
   });
 
