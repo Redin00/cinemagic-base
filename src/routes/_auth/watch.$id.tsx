@@ -120,9 +120,15 @@ function WatchPage() {
 
   const wallClockRef = useRef<{ start: number; position: number; running: boolean } | null>(null);
   const wallClockTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const playbackDurationSeconds = (activeEpisode?.duration || title?.runtime || 0) * 60;
 
   const startWallClock = (position: number) => {
     const safePos = Math.max(0, position);
+    if (playbackDurationSeconds > 0 && safePos >= playbackDurationSeconds) {
+      latestSecondsRef.current = 0;
+      persistMarker(0, true);
+      return;
+    }
     wallClockRef.current = { start: Date.now(), position: safePos, running: true };
     latestSecondsRef.current = safePos;
 
@@ -131,6 +137,11 @@ function WatchPage() {
       if (!wallClockRef.current || !wallClockRef.current.running) return;
       const elapsed = (Date.now() - wallClockRef.current.start) / 1000;
       const current = wallClockRef.current.position + elapsed;
+      if (playbackDurationSeconds > 0 && current >= playbackDurationSeconds) {
+        stopWallClock();
+        persistMarker(0, true);
+        return;
+      }
       latestSecondsRef.current = current;
       persistMarker(current, false);
     }, 5000);
@@ -153,12 +164,12 @@ function WatchPage() {
     persistMarker(current, true);
   };
 
-  const stopWallClock = () => {
+  const stopWallClock = (completed = false) => {
     if (wallClockRef.current?.running) {
       const elapsed = (Date.now() - wallClockRef.current.start) / 1000;
       const current = wallClockRef.current.position + elapsed;
       latestSecondsRef.current = current;
-      persistMarker(current, true);
+      persistMarker(completed ? 0 : current, true);
     }
     wallClockRef.current = null;
     if (wallClockTimerRef.current) {
@@ -281,6 +292,7 @@ function WatchPage() {
 
   function persistMarker(seconds: number, immediate = false) {
     if (!markerLoaded) return;
+    if (playbackDurationSeconds > 0 && seconds >= playbackDurationSeconds) seconds = 0;
     latestSecondsRef.current = seconds;
     if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
     const save = () => {
@@ -350,7 +362,7 @@ function WatchPage() {
           return;
         }
         if (trimmed === "ended" || trimmed === "finish" || trimmed === "complete") {
-          stopWallClock();
+          stopWallClock(true);
           return;
         }
         if (trimmed.startsWith("time:")) {
@@ -388,7 +400,7 @@ function WatchPage() {
       } else if (eventName.includes("seek")) {
         pauseWallClock();
       } else if (eventName.includes("ended") || eventName.includes("finish")) {
-        stopWallClock();
+        stopWallClock(true);
       }
 
       const info = (record.info ?? record.data ?? record.payload ?? record) as Record<string, unknown>;
@@ -450,7 +462,7 @@ function WatchPage() {
             src={playlistUrl}
             title={`${title.name} player`}
             onFatal={() => setHlsFailed(true)}
-            onTimeUpdate={persistMarker}
+            onTimeUpdate={(seconds) => persistMarker(seconds)}
             initialSeconds={marker ?? undefined}
           />
         </div>

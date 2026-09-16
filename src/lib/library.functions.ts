@@ -302,7 +302,7 @@ export const clearAllHistory = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-/** Remove one marker from the in-memory store (dev helper). */
+/** Remove one resume marker from the service and local fallback stores. */
 export const removeWatchMarker = createServerFn({ method: "POST" })
   .validator(
     (data) =>
@@ -315,20 +315,29 @@ export const removeWatchMarker = createServerFn({ method: "POST" })
         .parse(data),
   )
   .handler(async ({ data }): Promise<{ ok: boolean }> => {
+    const season = data.season ?? 0;
+    const episode = data.episode ?? 0;
     const idx = mockHistory.findIndex(
-      (e) =>
-        e.slug === data.slug &&
-        e.season === (data.season ?? 0) &&
-        e.episode === (data.episode ?? 0),
+      (e) => e.slug === data.slug && e.season === season && e.episode === episode,
     );
     if (idx !== -1) mockHistory[idx]!.marker = 0;
-    // Also clear the localStorage copy.
+
     try {
-      localStorage.removeItem(
-        `watch-marker:${data.slug}:${data.season ?? 0}:${data.episode ?? 0}`,
+      await serviceFetch<void>(
+        `/history/marker/${encodeURIComponent(data.slug)}?${new URLSearchParams({
+          season: String(season),
+          episode: String(episode),
+        })}`,
+        { method: "DELETE" },
       );
     } catch {
-      // Ignore.
+      // The in-memory and localStorage stores above remain the offline fallback.
+    }
+
+    try {
+      localStorage.removeItem(`watch-marker:${data.slug}:${season}:${episode}`);
+    } catch {
+      // Ignore storage errors.
     }
     return { ok: true };
   });

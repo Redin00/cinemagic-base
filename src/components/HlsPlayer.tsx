@@ -14,13 +14,7 @@ interface HlsPlayerProps {
   initialSeconds?: number | undefined;
 }
 
-export function HlsPlayer({
-  src,
-  title,
-  onFatal,
-  onTimeUpdate,
-  initialSeconds,
-}: HlsPlayerProps) {
+export function HlsPlayer({ src, title, onFatal, onTimeUpdate, initialSeconds }: HlsPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const onFatalRef = useRef(onFatal);
   const onTimeUpdateRef = useRef(onTimeUpdate);
@@ -83,6 +77,7 @@ export function HlsPlayer({
     let cancelled = false;
     let nativeError: (() => void) | null = null;
     let timeHandler: ((event: Event) => void) | null = null;
+    let endedHandler: (() => void) | null = null;
 
     const applyInitialSeek = () => {
       const target = initialSecondsRef.current;
@@ -135,7 +130,9 @@ export function HlsPlayer({
       const handler = onTimeUpdateRef.current;
       if (handler) handler(video.currentTime);
     };
+    endedHandler = () => onTimeUpdateRef.current?.(0);
     video.addEventListener("timeupdate", timeHandler);
+    video.addEventListener("ended", endedHandler);
 
     return () => {
       cancelled = true;
@@ -146,6 +143,7 @@ export function HlsPlayer({
         video.load();
       }
       if (timeHandler) video.removeEventListener("timeupdate", timeHandler);
+      if (endedHandler) video.removeEventListener("ended", endedHandler);
     };
   }, [src]);
 

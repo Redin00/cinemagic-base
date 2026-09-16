@@ -127,7 +127,7 @@ SC_DOMAIN = get_setting("sc_domain", os.environ.get("SC_DOMAIN", DEFAULT_SC_DOMA
 VIXSRC_DOMAIN = get_setting(
     "vixsrc_domain", os.environ.get("SC_VIXSRC_DOMAIN", DEFAULT_VIXSRC_DOMAIN)
 ).strip()
-IMAGE_CDN = os.environ.get("SC_IMAGE_CDN", f"https://cdn.{SC_DOMAIN}/images")
+IMAGE_CDN = f"https://cdn.{SC_DOMAIN}/images"
 api = API(SC_DOMAIN)
 vixsrc_session.headers["user-agent"] = api.user_agent
 JSON_HEADERS = {"user-agent": api.user_agent, "accept": "application/json"}
@@ -144,7 +144,7 @@ def configure_domains(sc_domain: str, vixsrc_domain: str) -> None:
     global SC_DOMAIN, VIXSRC_DOMAIN, IMAGE_CDN, api, JSON_HEADERS
     SC_DOMAIN = sc_domain
     VIXSRC_DOMAIN = vixsrc_domain
-    IMAGE_CDN = os.environ.get("SC_IMAGE_CDN", f"https://cdn.{SC_DOMAIN}/images")
+    IMAGE_CDN = f"https://cdn.{SC_DOMAIN}/images"
     api = API(SC_DOMAIN)
     vixsrc_session.headers["user-agent"] = api.user_agent
     JSON_HEADERS = {"user-agent": api.user_agent, "accept": "application/json"}
