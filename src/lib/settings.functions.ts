@@ -20,7 +20,7 @@ export const getDomainSettings = createServerFn({ method: "GET" }).handler(
   async (): Promise<DomainSettings> => serviceFetch<DomainSettings>("/settings/domains"),
 );
 
-export const updateDomainSettings = createServerFn({ method: "PUT" })
+export const updateDomainSettings = createServerFn({ method: "POST" })
   .validator((data) => z.object({ scDomain: domain, vixsrcDomain: domain }).parse(data))
   .handler(async ({ data }): Promise<{ ok: boolean; message?: string }> => {
     try {
