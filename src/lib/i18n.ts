@@ -15,6 +15,10 @@ export const EN = {
   auth_email: "Email",
   auth_name: "Name",
   auth_password: "Password",
+  auth_passwordSecurity:
+    "Your password is stored using PBKDF2-HMAC-SHA256 with a unique salt and is never stored as plain text. Use this page over HTTPS to protect it while it is being sent.",
+  auth_passwordSecurity:
+    "La tua password viene salvata usando PBKDF2-HMAC-SHA256 con un salt univoco e non viene mai salvata in chiaro. Usa questa pagina tramite HTTPS per proteggerla durante l'invio.",
   auth_forgotPassword: "Forgot password?",
   auth_signIn: "Sign in",
   auth_inviteOnly: "This is an invite-only application. Avoid sharing without consent.",

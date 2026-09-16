@@ -78,6 +78,9 @@ function RegisterPage() {
               minLength={6}
               maxLength={200}
             />
+            <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+              {t("auth_passwordSecurity")}
+            </p>
           </div>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
           <Button type="submit" className="w-full" disabled={busy}>
