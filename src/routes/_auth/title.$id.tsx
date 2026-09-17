@@ -67,7 +67,7 @@ function TitlePage() {
   const saved = library?.some((item) => item.slug === title.slug) ?? false;
 
   // Entries in the watch history for this title (any season/episode).
-  const myHistory = history?.filter((h) => h.slug === title.slug) ?? [];
+  const myHistory = history?.filter((h) => h.slug === title.slug && h.marker > 0) ?? [];
 
   async function toggleSave() {
     setBusy(true);
@@ -100,6 +100,15 @@ function TitlePage() {
         setError("Could not clear playback progress");
         return;
       }
+      queryClient.setQueryData<typeof history>(
+        historyQuery.queryKey,
+        (current) =>
+          current?.map((entry) =>
+            entry.slug === title.slug && entry.season === season && entry.episode === episode
+              ? { ...entry, marker: 0 }
+              : entry,
+          ) ?? null,
+      );
       void queryClient.invalidateQueries({ queryKey: historyQuery.queryKey });
     } catch (e) {
       setBusy(false);

@@ -8,6 +8,7 @@ import { HlsPlayer } from "@/components/HlsPlayer";
 import { AdBlockPrompt, useAdBlockPrompt } from "@/components/AdBlockPrompt";
 import { useBrowserInfo } from "@/hooks/use-browser-info";
 import { historyQuery } from "@/lib/auth/queries";
+import type { WatchEntry } from "@/lib/auth/types";
 import {
   getWatchMarker,
   recordPlay,
@@ -122,9 +123,23 @@ function WatchPage() {
   const wallClockTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const playbackDurationSeconds = (activeEpisode?.duration || title?.runtime || 0) * 60;
 
+  function clearCompletedMarker() {
+    setMarker(null);
+    queryClient.setQueryData<WatchEntry[] | null>(
+      historyQuery.queryKey,
+      (current) =>
+        current?.map((entry) =>
+          entry.slug === slug && entry.season === season && entry.episode === episode
+            ? { ...entry, marker: 0 }
+            : entry,
+        ) ?? null,
+    );
+  }
+
   const startWallClock = (position: number) => {
     const safePos = Math.max(0, position);
     if (playbackDurationSeconds > 0 && safePos >= playbackDurationSeconds) {
+      clearCompletedMarker();
       latestSecondsRef.current = 0;
       persistMarker(0, true);
       return;
@@ -139,6 +154,7 @@ function WatchPage() {
       const current = wallClockRef.current.position + elapsed;
       if (playbackDurationSeconds > 0 && current >= playbackDurationSeconds) {
         stopWallClock();
+        clearCompletedMarker();
         persistMarker(0, true);
         return;
       }
@@ -292,7 +308,10 @@ function WatchPage() {
 
   function persistMarker(seconds: number, immediate = false) {
     if (!markerLoaded) return;
-    if (playbackDurationSeconds > 0 && seconds >= playbackDurationSeconds) seconds = 0;
+    if (playbackDurationSeconds > 0 && seconds >= playbackDurationSeconds) {
+      clearCompletedMarker();
+      seconds = 0;
+    }
     latestSecondsRef.current = seconds;
     if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
     const save = () => {
@@ -401,9 +420,13 @@ function WatchPage() {
         pauseWallClock();
       } else if (eventName.includes("ended") || eventName.includes("finish")) {
         stopWallClock(true);
+        clearCompletedMarker();
       }
 
-      const info = (record.info ?? record.data ?? record.payload ?? record) as Record<string, unknown>;
+      const info = (record.info ?? record.data ?? record.payload ?? record) as Record<
+        string,
+        unknown
+      >;
       const rawSeconds =
         info.currentTime ??
         info.time ??
